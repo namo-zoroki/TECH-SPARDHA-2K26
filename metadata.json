@@ -1,0 +1,8 @@
+{
+  "name": "TechSpardha 2K26",
+  "description": "The official technical fest of IMS Engineering College, Ghaziabad. Organized by GENESIS Technical Team.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
