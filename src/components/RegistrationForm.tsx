@@ -6,8 +6,8 @@ import { Input, Select } from './ui/Input';
 import { apiService, RegistrationData } from '@/src/services/api';
 import { CheckCircle2, AlertTriangle, Upload, X, ChevronRight, ChevronLeft } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import techspardhaUPIQR from "../assets/images/techspardha-upi-qr.png";
-import { QRCodeCanvas } from 'qrcode.react';
+import { QRCodeCanvas } from "qrcode.react";
+
 
 export const RegistrationForm: React.FC = () => {
   const [step, setStep] = useState(1);
@@ -258,10 +258,10 @@ export const RegistrationForm: React.FC = () => {
                   <div className="mt-4 flex flex-col items-center gap-2">
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Official UPI Scan</p>
                     <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
-                      <span className="text-[10px] font-mono font-bold text-slate-700">7880435856@paytm</span>
+                      <span className="text-[10px] font-mono font-bold text-slate-700">akshayspn12@okicici</span>
                       <button 
                         onClick={() => {
-                          navigator.clipboard.writeText('7880435856@paytm');
+                          navigator.clipboard.writeText('akshayspn12@okicici');
                           alert('UPI ID copied to clipboard');
                         }}
                         className="text-[10px] text-cyan-600 font-bold uppercase hover:text-cyan-700"
