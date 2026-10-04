@@ -159,7 +159,7 @@ export const RegistrationForm: React.FC = () => {
             <h3 className="text-xl font-bold uppercase tracking-wider mb-8">Step 2: Participant Details</h3>
             <div className="grid md:grid-cols-2 gap-6">
               <Input label="Full Name" name="fullName" value={formData.fullName} onChange={handleInputChange} placeholder="Enter your full name" required />
-              <Input label="Email Address" name="email" type="email" value={formData.email} onChange={handleInputChange} placeholder="yourname@example.com" required />
+              <Input label="College Email Address" name="email" type="email" value={formData.email} onChange={handleInputChange} placeholder="yourname@example.com" required />
               <Input label="Mobile Number" name="phone" value={formData.phone} onChange={handleInputChange} placeholder="10-digit phone number" required />
               <Input label="College / Institution" name="college" value={formData.college} onChange={handleInputChange} placeholder="Your college name" required />
               <Input label="Student ID / Enrollment" name="studentId" value={formData.studentId} onChange={handleInputChange} placeholder="University Roll No." required />
