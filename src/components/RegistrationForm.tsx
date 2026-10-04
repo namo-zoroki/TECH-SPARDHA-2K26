@@ -194,7 +194,7 @@ export const RegistrationForm: React.FC = () => {
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-bold uppercase tracking-wider mb-8">Step 3: Team Details</h3>
-            <p> In this there are three gaming categories: BGMI, Valorant, and Free Fire. Please mention the game name along with your team name in the following format:<br></br>
+            <p> In Gamer Fiesta 2.0, there are three gaming categories: BGMI, Valorant, and Free Fire. Please mention the game name along with your team name in the following format:<br></br>
             Team Name – Game Name <br></br>
             Example: If your team name is XYZ and you want to participate in BGMI, enter your team name as:<br></br>
             XYZ-BGMI<br></br>
