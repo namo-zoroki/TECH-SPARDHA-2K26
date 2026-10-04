@@ -8,7 +8,6 @@ import { CheckCircle2, AlertTriangle, Upload, X, ChevronRight, ChevronLeft } fro
 import { cn } from '@/src/lib/utils';
 import { QRCodeCanvas } from "qrcode.react";
 
-
 export const RegistrationForm: React.FC = () => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -238,10 +237,11 @@ export const RegistrationForm: React.FC = () => {
                 <div className="bg-white p-6 rounded-lg shadow-inner flex flex-col items-center">
                   <div className="aspect-square bg-white flex items-center justify-center p-2 border border-slate-200">
                     <div className="flex justify-center">
-                      <img
-                        src={techspardhaUPIQR}
-                        alt="TechSpardha UPI Payment QR"
-                        className="w-[280px] h-[280px] object-contain"
+                      <QRCodeCanvas
+                        value={`upi://pay?pa=akshayspn12@okicici&pn=TechSpardha%202K26&am=${selectedEvent.fee}&cu=INR&tn=TechSpardha%202K26%20Registration`}
+                        size={220}
+                        level="H"
+                        includeMargin={true}
                       />
                     </div>
                     <p className="text-sm text-center text-white/70 mt-4">
