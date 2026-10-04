@@ -6,7 +6,7 @@ import { Input, Select } from './ui/Input';
 import { apiService, RegistrationData } from '@/src/services/api';
 import { CheckCircle2, AlertTriangle, Upload, X, ChevronRight, ChevronLeft } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-
+import techspardhaUPIQR from "../assets/images/techspardha-upi-qr.png";
 import { QRCodeCanvas } from 'qrcode.react';
 
 export const RegistrationForm: React.FC = () => {
@@ -237,12 +237,23 @@ export const RegistrationForm: React.FC = () => {
               <div className="w-full max-w-sm space-y-4 mb-8">
                 <div className="bg-white p-6 rounded-lg shadow-inner flex flex-col items-center">
                   <div className="aspect-square bg-white flex items-center justify-center p-2 border border-slate-200">
-                    <QRCodeCanvas 
-                      value={`upi://pay?pa=7880435856@paytm&am=${selectedEvent.fee}.00&cu=INR`}
-                      size={200}
-                      level="H"
-                      includeMargin={true}
-                    />
+                    <div className="flex justify-center">
+                      <img
+                        src={techspardhaUPIQR}
+                        alt="TechSpardha UPI Payment QR"
+                        className="w-[280px] h-[280px] object-contain"
+                      />
+                    </div>
+                    <p className="text-sm text-center text-white/70 mt-4">
+                      UPI ID:{" "}
+                      <span className="font-mono font-bold text-cyan-400">
+                        akshayspn12@okicici
+                      </span>
+                    </p>
+                    <p className="text-xs text-center text-white/50 mt-2">
+                    Scan the QR code to make the payment of ₹{selectedEvent.fee}.
+                    After payment, upload the payment screenshot below.
+                    </p>
                   </div>
                   <div className="mt-4 flex flex-col items-center gap-2">
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Official UPI Scan</p>
