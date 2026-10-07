@@ -146,11 +146,12 @@ export const GamerFiestaSpecial: React.FC = () => {
 
             <div className="relative">
               {/* This would be an awesome 3D model or high-res image */}
-              <div className="aspect-square bg-gradient-to-br from-purple-500/10 to-cyan-500/10 border border-white/5 flex items-center justify-center p-12">
+              {/* overflow-hidden clips the big background word so it can never widen the page on phones */}
+              <div className="relative overflow-hidden aspect-square bg-gradient-to-br from-purple-500/10 to-cyan-500/10 border border-white/5 flex items-center justify-center p-12">
                 <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]" />
-                <Gamepad2 className="w-64 h-64 text-white/10 animate-pulse" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full text-center">
-                  <p className="text-[120px] font-display font-black text-white/5 select-none uppercase">GAMER</p>
+                <Gamepad2 className="w-40 h-40 sm:w-64 sm:h-64 text-white/10 animate-pulse" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full text-center overflow-hidden">
+                  <p className="text-[64px] sm:text-[96px] md:text-[120px] leading-none whitespace-nowrap font-display font-black text-white/5 select-none uppercase">GAMER</p>
                 </div>
               </div>
             </div>

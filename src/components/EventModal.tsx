@@ -40,7 +40,7 @@ export const EventModal: React.FC<EventModalProps> = ({ event, onClose }) => {
                 </span>
                 <h2 className="text-3xl md:text-4xl font-bold uppercase">{event.name}</h2>
               </div>
-              <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+              <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors" aria-label="Close">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -59,6 +59,14 @@ export const EventModal: React.FC<EventModalProps> = ({ event, onClose }) => {
                     <p className="text-sm font-bold text-white">{item.value}</p>
                   </div>
                 ))}
+
+                {/* Event Lead: full-width row, shown only when the event has a lead */}
+                {event.lead && (
+                  <div className="col-span-2 md:col-span-4 bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
+                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Event Lead</p>
+                    <p className="text-sm font-bold text-white">{event.lead}</p>
+                  </div>
+                )}
               </div>
 
               {/* Content Sections */}

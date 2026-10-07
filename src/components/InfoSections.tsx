@@ -36,6 +36,29 @@ export const Rules: React.FC = () => {
     "Event-specific tie-break mechanisms will be communicated by judges."
   ];
 
+  const registrationRules = [
+    {
+      title: "One event per slot",
+      text: "Events are grouped into Slot 1, Slot 2, Slot 3 and TechSnap. You can register for only one event in each slot, so no two of your events ever clash."
+    },
+    {
+      title: "Four events at most",
+      text: "That makes four registrations per student: one in each of Slot 1, Slot 2, Slot 3 and TechSnap. The limit applies to every team member, not only the captain."
+    },
+    {
+      title: "Slot 3 runs together",
+      text: "All four Slot 3 events (Cyber Hunt, Tech Wars, CEO Quest and Tech Treasure Hunt) run at the same time, so you can join only one of them."
+    },
+    {
+      title: "1st year students choose ASH",
+      text: "First-year students must select ASH as their branch. ASH is only for 1st year. MBA and MCA students select MBA or MCA instead, and can be 1st or 2nd year."
+    },
+    {
+      title: "College ID cards are checked at entry",
+      text: "Every participant must carry their college ID card. Your details are matched against your registration at the venue, so enter your College ID exactly as printed on the card."
+    }
+  ];
+
   return (
     <section id="rules" className="section-padding bg-black">
       <div className="container-width">
@@ -62,6 +85,18 @@ export const Rules: React.FC = () => {
             viewport={{ once: true }}
             className="space-y-12"
           >
+            <div>
+              <h3 className="text-2xl md:text-3xl font-bold uppercase mb-6">Registration <span className="text-cyan-500">Rules</span></h3>
+              <div className="space-y-4">
+                {registrationRules.map((rule) => (
+                  <div key={rule.title} className="p-4 bg-white/5 border border-white/5 border-l-2 border-l-cyan-500">
+                    <p className="text-sm font-bold mb-1">{rule.title}</p>
+                    <p className="text-sm text-white/60 leading-relaxed">{rule.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="bg-cyan-500/10 border border-cyan-500/20 p-8">
               <h3 className="text-xl font-bold uppercase mb-6 flex items-center gap-3">
                 <Trophy className="text-cyan-500" /> Judging & Fair Play
@@ -201,10 +236,8 @@ export const Footer: React.FC = () => {
           <div>
             <h4 className="text-[10px] uppercase tracking-[0.3em] text-white/40 mb-6 font-bold">Resources</h4>
             <div className="flex flex-col gap-4 text-sm text-white/60">
-              <a href="#" className="hover:text-cyan-400 transition-colors">Event Brochure</a>
-              <a href="#" className="hover:text-cyan-400 transition-colors">Rulebook PDF</a>
+              {/* Event Brochure and Rulebook PDF links are hidden until the files exist. */}
               <a href="#contact" className="hover:text-cyan-400 transition-colors">Support</a>
-              <a href="#admin" className="hover:text-white transition-colors opacity-20">Admin Login</a>
             </div>
           </div>
         </div>

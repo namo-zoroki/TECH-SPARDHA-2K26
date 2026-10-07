@@ -7,7 +7,8 @@ import { Events, GamerFiestaSpecial } from './components/Events';
 import { RegistrationForm } from './components/RegistrationForm';
 import { Schedule, Rules, Contact, Footer } from './components/InfoSections';
 import { AdminDashboard } from './components/AdminDashboard';
-import { motion, AnimatePresence } from 'motion/react';
+import { Button } from './components/ui/Button';
+import { apiService } from './services/api';
 
 export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -20,6 +21,11 @@ export default function App() {
     handleHashChange(); // Initial check
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
+
+  const exitAdmin = () => {
+    apiService.admin.logout(); // forget the session token
+    window.location.hash = '';
+  };
 
   if (isAdmin) {
     return (
@@ -34,7 +40,7 @@ export default function App() {
                 GENESIS <span className="text-xs text-white/40 ml-2 pt-1 uppercase">Admin</span>
               </span>
             </a>
-            <Button variant="outline" size="sm" onClick={() => window.location.hash = ''}>Exit Admin</Button>
+            <Button variant="outline" size="sm" onClick={exitAdmin}>Exit Admin</Button>
           </div>
         </div>
         <AdminDashboard />
@@ -45,9 +51,9 @@ export default function App() {
   return (
     <div className="relative selection:bg-cyan-500/30">
       <Preloader />
-      
+
       <Navbar />
-      
+
       <main>
         <Hero />
         <About />
@@ -58,7 +64,7 @@ export default function App() {
         <Rules />
         <Contact />
       </main>
-      
+
       <Footer />
 
       {/* Dynamic scanlines overlay for futuristic feel */}
@@ -66,15 +72,3 @@ export default function App() {
     </div>
   );
 }
-
-const Button = ({ children, variant, size, onClick }: any) => (
-  <button 
-    onClick={onClick}
-    className={`px-4 py-2 text-xs font-bold uppercase tracking-widest transition-all ${
-      variant === 'outline' ? 'border border-white/20 hover:bg-white/5' : 'bg-white text-black'
-    }`}
-  >
-    {children}
-  </button>
-);
-

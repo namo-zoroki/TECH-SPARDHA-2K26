@@ -1,9 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { events } from "@/src/data/events";
-import { Button } from "./ui/Button";
-import { Input, Select } from "./ui/Input";
-import { apiService, RegistrationData } from "@/src/services/api";
+import { QRCodeCanvas } from "qrcode.react";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -11,577 +8,1205 @@ import {
   X,
   ChevronRight,
   ChevronLeft,
+  Copy,
+  Check,
 } from "lucide-react";
+import { Button } from "./ui/Button";
+import { Input, Select } from "./ui/Input";
 import { cn } from "@/src/lib/utils";
-import { QRCodeCanvas } from "qrcode.react";
+import {
+  apiService,
+  fileToDataUrl,
+  newIdempotencyKey,
+  isFailure,
+  type EventInfo,
+  type Person,
+  type RegisterPayload,
+  type RegisterSuccess,
+} from "@/src/services/api";
+import {
+  BRANCH_CODES,
+  MAX_SCREENSHOT_BYTES,
+  SLOT_GROUPS,
+  UPI_ID,
+  YEAR_OPTIONS,
+  buildUpiLink,
+  emptyPerson,
+  normalizeCollegeId,
+  toApiPerson,
+  updatePerson,
+  validatePerson,
+  yearsForBranch,
+  type PersonErrors,
+} from "@/src/config/constants";
+
+// ---------------------------------------------------------------------------
+// Types and small helpers
+// ---------------------------------------------------------------------------
+
+type StepId = 1 | 2 | 3 | 4 | 5;
+
+interface Shot {
+  file: File;
+  preview: string;
+}
+
+interface Draft {
+  step: StepId;
+  eventId: string;
+  captain: Person;
+  teamName: string;
+  game: string;
+  members: Person[];
+  utr: string;
+  key: string;
+}
+
+interface SubmitError {
+  message: string;
+  list: string[];
+  retry: boolean;
+}
+
+const DRAFT_KEY = "ts26_registration_draft_v1";
+const RETRYABLE = ["NETWORK_ERROR", "TIMEOUT", "BAD_RESPONSE", "SERVER_ERROR", "BUSY"];
+
+const STEP_TITLES: Record<StepId, string> = {
+  1: "Select Your Event",
+  2: "Your Details",
+  3: "Team Details",
+  4: "Payment",
+  5: "Review & Submit",
+};
+
+const isTeamEvent = (ev?: EventInfo) => !!ev && ev.teamMax > 1;
+
+function stepsFor(ev?: EventInfo): StepId[] {
+  const s: StepId[] = [1, 2];
+  if (isTeamEvent(ev)) s.push(3);
+  if (ev && ev.fee > 0) s.push(4);
+  s.push(5);
+  return s;
+}
+
+/** Exact size when a game fixes it, otherwise the event's range. */
+function teamBounds(ev: EventInfo, game: string): { min: number; max: number } {
+  const exact = game ? ev.gameSizes[game] : undefined;
+  return exact ? { min: exact, max: exact } : { min: ev.teamMin, max: ev.teamMax };
+}
+
+function teamLabel(ev: EventInfo): string {
+  if (ev.games.length && Object.keys(ev.gameSizes).length) {
+    return "Players: " + ev.games.map((g) => (ev.gameSizes[g] ? `${g} ${ev.gameSizes[g]}` : g)).join(" · ");
+  }
+  if (ev.teamMax === 1) return "Solo";
+  if (ev.teamMin === ev.teamMax) return ev.teamMax === 2 ? "Duo (2 players)" : `Team of ${ev.teamMax}`;
+  return ev.teamMin === 1 ? `Solo or team of up to ${ev.teamMax}` : `Team of ${ev.teamMin} to ${ev.teamMax}`;
+}
+
+function cleanPerson(x: unknown): Person {
+  const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+  const s = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : "");
+  return {
+    fullName: s("fullName"),
+    collegeId: s("collegeId"),
+    email: s("email"),
+    phone: s("phone"),
+    year: s("year"),
+    branch: s("branch"),
+  };
+}
+
+function loadDraft(): Draft | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Record<string, unknown>;
+    if (!d || typeof d !== "object") return null;
+    const eventId = typeof d.eventId === "string" ? d.eventId : "";
+    const step = [1, 2, 3, 4, 5].includes(d.step as number) && eventId ? (d.step as StepId) : 1;
+    const key = typeof d.key === "string" && /^[A-Za-z0-9_-]{8,100}$/.test(d.key) ? d.key : newIdempotencyKey();
+    return {
+      step,
+      eventId,
+      captain: cleanPerson(d.captain),
+      teamName: typeof d.teamName === "string" ? d.teamName : "",
+      game: typeof d.game === "string" ? d.game : "",
+      members: Array.isArray(d.members) ? d.members.slice(0, 20).map(cleanPerson) : [],
+      utr: typeof d.utr === "string" ? d.utr.replace(/\D/g, "").slice(0, 12) : "",
+      key,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(d: Draft) {
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); // the screenshot is never saved
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearDraft() {
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// One person's fields (captain or member). Defined at module level so inputs keep focus.
+// ---------------------------------------------------------------------------
+
+interface PersonFieldsProps {
+  prefix: string;
+  person: Person;
+  errors: PersonErrors;
+  visible: (key: string) => boolean;
+  onChange: (field: keyof Person, value: string) => void;
+  onTouch: (key: string) => void;
+}
+
+const PersonFields: React.FC<PersonFieldsProps> = ({ prefix, person, errors, visible, onChange, onTouch }) => {
+  const err = (f: keyof Person) => (visible(`${prefix}.${f}`) ? errors[f] : undefined);
+  const yearAllowed = yearsForBranch(person.branch);
+
+  return (
+    <div
+      className="grid md:grid-cols-2 gap-6"
+      onBlur={(e) => {
+        const name = (e.target as HTMLElement).getAttribute("name");
+        if (name) onTouch(`${prefix}.${name}`);
+      }}
+    >
+      <Input
+        label="Full Name"
+        name="fullName"
+        value={person.fullName}
+        onChange={(e) => onChange("fullName", e.target.value)}
+        placeholder="Enter full name"
+        maxLength={80}
+        autoComplete="off"
+        error={err("fullName")}
+      />
+      <Input
+        label="College ID"
+        name="collegeId"
+        value={person.collegeId}
+        onChange={(e) => onChange("collegeId", e.target.value)}
+        placeholder="e.g. A2026IT11257"
+        maxLength={20}
+        autoCapitalize="characters"
+        autoComplete="off"
+        error={err("collegeId")}
+      />
+      <Input
+        label="Email Address"
+        name="email"
+        type="email"
+        value={person.email}
+        onChange={(e) => onChange("email", e.target.value)}
+        placeholder="name@example.com"
+        maxLength={254}
+        autoComplete="off"
+        error={err("email")}
+      />
+      <Input
+        label="Mobile Number"
+        name="phone"
+        type="tel"
+        inputMode="tel"
+        value={person.phone}
+        onChange={(e) => onChange("phone", e.target.value)}
+        placeholder="10-digit mobile number"
+        maxLength={14}
+        autoComplete="off"
+        error={err("phone")}
+      />
+      <Select
+        label="Current Year"
+        name="year"
+        value={person.year}
+        onChange={(e) => onChange("year", e.target.value)}
+        disabled={person.branch === "ASH"}
+        options={[
+          { label: "Select year", value: "" },
+          ...YEAR_OPTIONS.filter((y) => yearAllowed.includes(y.value)).map((y) => ({ label: y.label, value: y.value })),
+        ]}
+        error={err("year")}
+      />
+      <div className="space-y-1.5">
+        <Select
+          label="Branch"
+          name="branch"
+          value={person.branch}
+          onChange={(e) => onChange("branch", e.target.value)}
+          options={[
+            { label: "Select branch", value: "" },
+            ...BRANCH_CODES.map((b) => ({ label: b === "ASH" ? "ASH (1st year B.Tech)" : b, value: b })),
+          ]}
+          error={err("branch")}
+        />
+        <p className="text-[10px] text-white/40 tracking-wide">1st year B.Tech students: choose ASH.</p>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// The form
+// ---------------------------------------------------------------------------
 
 export const RegistrationForm: React.FC = () => {
-  const [step, setStep] = useState(1);
+  const [initial] = useState<Draft | null>(loadDraft);
+
+  const [events, setEvents] = useState<EventInfo[] | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+
+  const [step, setStep] = useState<StepId>(initial?.step ?? 1);
+  const [eventId, setEventId] = useState(initial?.eventId ?? "");
+  const [captain, setCaptain] = useState<Person>(initial?.captain ?? emptyPerson());
+  const [teamName, setTeamName] = useState(initial?.teamName ?? "");
+  const [game, setGame] = useState(initial?.game ?? "");
+  const [members, setMembers] = useState<Person[]>(initial?.members ?? []);
+  const [utr, setUtr] = useState(initial?.utr ?? "");
+  const [shot, setShot] = useState<Shot | null>(null);
+  const [shotError, setShotError] = useState("");
+  const [consent, setConsent] = useState(false);
+
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [attempted, setAttempted] = useState<Record<number, boolean>>({});
+  const [pendingGame, setPendingGame] = useState<{ game: string; need: number; remove: number[] } | null>(null);
+
   const [loading, setLoading] = useState(false);
-  const [successData, setSuccessData] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
+  const [submitError, setSubmitError] = useState<SubmitError | null>(null);
+  const [success, setSuccess] = useState<RegisterSuccess | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [copiedReg, setCopiedReg] = useState(false);
+  const [copiedUpi, setCopiedUpi] = useState(false);
 
-  const [formData, setFormData] = useState<Partial<RegistrationData>>({
-    eventId: "",
-    fullName: "",
-    email: "",
-    phone: "",
-    college: "",
-    studentId: "",
-    year: "1st Year",
-    branch: "",
-    teamName: "",
-    teamCaptain: "",
-    teamMembers: [],
-  });
+  const keyRef = useRef<string>(initial?.key ?? newIdempotencyKey());
+  const cardRef = useRef<HTMLDivElement>(null);
+  const pendingEventRef = useRef<string | null>(null);
+  const sanitizedRef = useRef(false);
 
-  const [screenshot, setScreenshot] = useState<{
-    file: File;
-    preview: string;
-  } | null>(null);
-
-  // Handle external event selection (from event cards)
-  useEffect(() => {
-    const handleSelectEvent = (e: any) => {
-      const selectedEvent = events.find((ev) => ev.id === e.detail);
-      if (selectedEvent) {
-        setFormData((prev) => ({
-          ...prev,
-          eventId: selectedEvent.id,
-          eventName: selectedEvent.name,
-          category: selectedEvent.category,
-          format: selectedEvent.format,
-          paymentRequired: selectedEvent.fee > 0,
-          paymentAmount: selectedEvent.fee,
-        }));
-        setStep(2);
-      }
-    };
-    window.addEventListener("select-event", handleSelectEvent);
-    return () => window.removeEventListener("select-event", handleSelectEvent);
+  // ----- load events from the backend (the Events sheet is the source of truth) -----
+  const loadEvents = useCallback(async () => {
+    setEventsError(null);
+    const res = await apiService.getEvents();
+    if (isFailure(res)) {
+      setEventsError(res.message);
+      return;
+    }
+    setEvents(res.events);
   }, []);
 
-  const selectedEvent = events.find((e) => e.id === formData.eventId);
+  useEffect(() => {
+    void loadEvents();
+  }, [loadEvents]);
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+  const selectedEvent = useMemo(() => events?.find((e) => e.eventId === eventId), [events, eventId]);
+  const isTeam = isTeamEvent(selectedEvent);
+  const needsPay = !!selectedEvent && selectedEvent.fee > 0;
+  const hasGames = !!selectedEvent && selectedEvent.games.length > 0;
+  const steps = stepsFor(selectedEvent);
+  const bounds = selectedEvent ? teamBounds(selectedEvent, game) : { min: 1, max: 1 };
+  const memberCount = 1 + members.length;
 
-  const handleScreenshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        alert("File size should be less than 2MB");
+  // ----- restored draft: drop it if the event vanished or closed -----
+  useEffect(() => {
+    if (!events || sanitizedRef.current) return;
+    sanitizedRef.current = true;
+    if (!eventId) {
+      if (step !== 1) setStep(1);
+      return;
+    }
+    const ev = events.find((e) => e.eventId === eventId);
+    if (!ev || !ev.open) {
+      setEventId("");
+      setStep(1);
+      return;
+    }
+    if (game && !ev.games.includes(game)) setGame("");
+    if (step === 5 && ev.fee > 0) setStep(4); // the screenshot is not saved in the draft
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  // ----- keep the member list at least as long as the minimum team size -----
+  useEffect(() => {
+    if (!selectedEvent || !isTeam) return;
+    if (hasGames && !game) return;
+    const need = bounds.min - 1;
+    setMembers((prev) => (prev.length < need ? [...prev, ...Array.from({ length: need - prev.length }, () => emptyPerson())] : prev));
+  }, [selectedEvent, isTeam, hasGames, game, bounds.min]);
+
+  // ----- a step that does not apply to this event is skipped -----
+  useEffect(() => {
+    if (success || !selectedEvent) return;
+    if (!steps.includes(step)) setStep(2);
+  }, [selectedEvent, step, steps, success]);
+
+  // ----- save the draft (never the screenshot, never the consent) -----
+  useEffect(() => {
+    if (success) return;
+    saveDraft({ step, eventId, captain, teamName, game, members, utr, key: keyRef.current });
+  }, [step, eventId, captain, teamName, game, members, utr, success]);
+
+  const scrollToCard = () =>
+    setTimeout(() => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+
+  // ----- choosing an event -----
+  const chooseEvent = useCallback(
+    (ev: EventInfo) => {
+      if (!ev.open) return;
+      setNotice(null);
+      if (success || ev.eventId !== eventId) {
+        setEventId(ev.eventId);
+        setGame("");
+        setTeamName("");
+        setMembers([]);
+        setUtr("");
+        setShot(null);
+        setShotError("");
+        setConsent(false);
+        setPendingGame(null);
+        setSubmitError(null);
+        setTouched({});
+        setAttempted({});
+        keyRef.current = newIdempotencyKey();
+      }
+      setSuccess(null);
+      setStep(2);
+    },
+    [eventId, success],
+  );
+
+  // ----- event cards elsewhere on the page ask us to select an event -----
+  useEffect(() => {
+    const apply = (id: string) => {
+      const ev = events?.find((e) => e.eventId === id);
+      if (!ev) return;
+      pendingEventRef.current = null;
+      if (!ev.open) {
+        setNotice(`Registration for ${ev.name} is closed.`);
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setScreenshot({ file, preview: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    }
+      chooseEvent(ev);
+    };
+    if (events && pendingEventRef.current) apply(pendingEventRef.current);
+    const handler = (e: Event) => {
+      const id = String((e as CustomEvent).detail ?? "");
+      if (!id) return;
+      pendingEventRef.current = id;
+      apply(id);
+    };
+    window.addEventListener("select-event", handler);
+    return () => window.removeEventListener("select-event", handler);
+  }, [events, chooseEvent]);
+
+  // ----- field helpers -----
+  const touch = (key: string) => setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
+  const clearMemberTouched = () =>
+    setTouched((t) => Object.fromEntries(Object.entries(t).filter(([k]) => !k.startsWith("m"))));
+
+  const updateMember = (i: number, field: keyof Person, value: string) =>
+    setMembers((prev) => prev.map((m, j) => (j === i ? updatePerson(m, field, value) : m)));
+
+  const addMember = () => setMembers((prev) => [...prev, emptyPerson()]);
+  const removeMember = (i: number) => {
+    setMembers((prev) => prev.filter((_, j) => j !== i));
+    clearMemberTouched();
   };
 
-  const nextStep = () => {
-    if (step === 1 && !formData.eventId) return;
-    if (
-      step === 2 &&
-      (!formData.fullName || !formData.email || !formData.studentId)
-    )
+  // Changing the game may need a smaller team: never remove anyone silently.
+  const requestGame = (g: string) => {
+    if (!selectedEvent) return;
+    if (!g) {
+      setGame("");
       return;
-    setStep((prev) => prev + 1);
+    }
+    const size = selectedEvent.gameSizes[g] ?? selectedEvent.teamMax;
+    if (members.length > size - 1) {
+      setPendingGame({ game: g, need: members.length - (size - 1), remove: [] });
+      return;
+    }
+    setGame(g);
   };
 
-  const prevStep = () => setStep((prev) => prev - 1);
+  const togglePendingRemoval = (i: number) =>
+    setPendingGame((p) => {
+      if (!p) return p;
+      const remove = p.remove.includes(i) ? p.remove.filter((x) => x !== i) : [...p.remove, i];
+      return { ...p, remove };
+    });
 
-  const handleSubmit = async () => {
-    setLoading(true);
-    setError(null);
+  const confirmGameChange = () => {
+    if (!pendingGame || pendingGame.remove.length !== pendingGame.need) return;
+    setMembers((prev) => prev.filter((_, i) => !pendingGame.remove.includes(i)));
+    setGame(pendingGame.game);
+    setPendingGame(null);
+    clearMemberTouched();
+  };
 
-    try {
-      const payload: RegistrationData = {
-        ...formData,
-        paymentScreenshot: screenshot
-          ? {
-              type: screenshot.file.type,
-              base64: screenshot.preview,
-            }
-          : undefined,
-      } as RegistrationData;
-
-      const response = await apiService.register(payload);
-
-      if (response.success) {
-        setSuccessData({
-          ...response,
-          participantName: formData.fullName,
-          eventName: formData.eventName,
-          email: formData.email,
-        });
-        setStep(6);
-      } else {
-        setError(response.message || "An unexpected error occurred.");
-      }
-    } catch (err) {
-      setError(
-        "Failed to submit registration. Please check your internet connection.",
+  // ----- screenshot -----
+  const onShotChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    setShotError("");
+    if (file.type !== "image/png" && file.type !== "image/jpeg") {
+      const heic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+      setShotError(
+        heic
+          ? "HEIC photos are not supported. Please upload a JPG or PNG screenshot."
+          : "Only JPG or PNG images are allowed. Please upload a JPG or PNG screenshot.",
       );
-    } finally {
-      setLoading(false);
+      return;
     }
+    if (file.size > MAX_SCREENSHOT_BYTES) {
+      setShotError("The screenshot is larger than 2 MB. Please upload a smaller image.");
+      return;
+    }
+    try {
+      setShot({ file, preview: await fileToDataUrl(file) });
+    } catch {
+      setShotError("Could not read that file. Please try another screenshot.");
+    }
+  };
+
+  const copyText = async (text: string, done: (v: boolean) => void) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      done(true);
+      setTimeout(() => done(false), 2000);
+    } catch {
+      /* clipboard blocked: the text is visible on screen anyway */
+    }
+  };
+
+  // ----- validation -----
+  const captainErrors = useMemo(() => validatePerson(captain), [captain]);
+
+  const memberErrors = useMemo<PersonErrors[]>(() => {
+    const seen = new Set<string>();
+    const c = normalizeCollegeId(captain.collegeId);
+    if (c) seen.add(c);
+    return members.map((m) => {
+      const errs = validatePerson(m);
+      const id = normalizeCollegeId(m.collegeId);
+      if (id) {
+        if (seen.has(id)) errs.collegeId = "This College ID is already in your team (the captain counts as a member).";
+        else seen.add(id);
+      }
+      return errs;
+    });
+  }, [captain.collegeId, members]);
+
+  const teamNameClean = teamName.trim().replace(/\s+/g, " ");
+  const teamNameError =
+    isTeam && (memberCount >= 2 || teamNameClean) && (teamNameClean.length < 2 || teamNameClean.length > 40)
+      ? "Team name must be 2 to 40 characters."
+      : undefined;
+  const gameError = hasGames && !game ? "Choose exactly one game." : undefined;
+  const sizeError =
+    isTeam && (!hasGames || game) && (memberCount < bounds.min || memberCount > bounds.max)
+      ? bounds.min === bounds.max
+        ? `This team needs exactly ${bounds.min} players including you.`
+        : `Team size must be between ${bounds.min} and ${bounds.max} players including you.`
+      : undefined;
+  const membersValid = memberErrors.every((e) => Object.keys(e).length === 0);
+  const utrValid = /^\d{12}$/.test(utr);
+
+  const stepValid = (s: StepId): boolean => {
+    switch (s) {
+      case 1:
+        return !!selectedEvent && selectedEvent.open;
+      case 2:
+        return Object.keys(captainErrors).length === 0;
+      case 3:
+        return !teamNameError && !gameError && !sizeError && membersValid && !pendingGame;
+      case 4:
+        return utrValid && !!shot;
+      case 5:
+        return consent;
+    }
+  };
+
+  const allValid =
+    !!selectedEvent &&
+    selectedEvent.open &&
+    stepValid(2) &&
+    (!isTeam || stepValid(3)) &&
+    (!needsPay || stepValid(4)) &&
+    consent;
+
+  // ----- navigation -----
+  const goNext = () => {
+    setAttempted((a) => ({ ...a, [step]: true }));
+    if (!stepValid(step)) {
+      setTimeout(() => {
+        const bad = cardRef.current?.querySelector<HTMLElement>(".border-red-500\\/50");
+        bad?.scrollIntoView({ behavior: "smooth", block: "center" });
+        bad?.focus?.();
+      }, 0);
+      return;
+    }
+    const next = steps[steps.indexOf(step) + 1];
+    if (next) {
+      setStep(next);
+      scrollToCard();
+    }
+  };
+
+  const goBack = () => {
+    const prev = steps[steps.indexOf(step) - 1];
+    if (prev) {
+      setStep(prev);
+      scrollToCard();
+    }
+  };
+
+  // ----- submit -----
+  const handleSubmit = async () => {
+    if (!selectedEvent || loading) return;
+    if (!allValid) {
+      setAttempted((a) => ({ ...a, 5: true }));
+      return;
+    }
+    setLoading(true);
+    setSlow(false);
+    setSubmitError(null);
+
+    const payload: RegisterPayload = {
+      idempotencyKey: keyRef.current,
+      eventId: selectedEvent.eventId,
+      captain: toApiPerson(captain),
+      consent: true,
+    };
+    if (isTeam) {
+      payload.members = members.map(toApiPerson);
+      if (teamNameClean) payload.teamName = teamNameClean;
+      if (hasGames) payload.game = game;
+    }
+    if (needsPay && shot) {
+      payload.payment = { utr, screenshot: { type: shot.file.type, base64: shot.preview } };
+    }
+
+    const res = await apiService.register(payload, { onSlow: () => setSlow(true) });
+    setLoading(false);
+    setSlow(false);
+
+    if (res.success) {
+      clearDraft();
+      setSuccess(res);
+      scrollToCard();
+      return;
+    }
+
+    const list = res.errors?.map((e) => e.message) ?? [];
+    setSubmitError({ message: res.message, list, retry: RETRYABLE.includes(res.error) });
+    if (res.error === "EVENT_NOT_FOUND" || res.errors?.some((e) => e.code === "EVENT_CLOSED")) void loadEvents();
+  };
+
+  const startAnother = () => {
+    setSuccess(null);
+    setEventId("");
+    setStep(1);
+    setTeamName("");
+    setGame("");
+    setMembers([]);
+    setUtr("");
+    setShot(null);
+    setShotError("");
+    setConsent(false);
+    setPendingGame(null);
+    setSubmitError(null);
+    setTouched({});
+    setAttempted({});
+    keyRef.current = newIdempotencyKey();
+    scrollToCard();
+  };
+
+  const visibleFor = (s: StepId) => (key: string) => !!attempted[s] || !!touched[key];
+
+  // -------------------------------------------------------------------------
+  // Step views
+  // -------------------------------------------------------------------------
+
+  const stepHeading = (s: StepId) => (
+    <h3 className="text-xl font-bold uppercase tracking-wider mb-8">
+      Step {steps.indexOf(s) + 1}: {STEP_TITLES[s]}
+    </h3>
+  );
+
+  const navButtons = (opts: { nextDisabled?: boolean } = {}) => (
+    <div className="flex justify-between pt-8">
+      <Button variant="outline" onClick={goBack}>
+        <ChevronLeft className="mr-2 h-4 w-4" /> Back
+      </Button>
+      <Button variant="secondary" onClick={goNext} disabled={!!opts.nextDisabled}>
+        Next <ChevronRight className="ml-2 h-4 w-4" />
+      </Button>
+    </div>
+  );
+
+  const renderEventStep = () => (
+    <div className="space-y-8">
+      {stepHeading(1)}
+      <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 text-sm text-white/70 leading-relaxed">
+        You can join <strong className="text-white">one event per slot</strong>, up to four events in total including
+        TechSnap. Every team member counts toward the slot, not only the captain.
+      </div>
+
+      {events === null && !eventsError && <p className="text-white/50 text-sm">Loading events…</p>}
+
+      {eventsError && (
+        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm space-y-4">
+          <div className="flex gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <p>{eventsError} Registration is unavailable until the events load.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void loadEvents()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {events &&
+        SLOT_GROUPS.map((g) => {
+          const list = events.filter((e) => e.slot === g.slot);
+          if (!list.length) return null;
+          return (
+            <div key={g.slot} className="space-y-3">
+              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <h4 className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-400">{g.title}</h4>
+                <span className="text-xs text-white/40">{g.note}</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {list.map((ev) => (
+                  <button
+                    type="button"
+                    key={ev.eventId}
+                    disabled={!ev.open}
+                    onClick={() => chooseEvent(ev)}
+                    className={cn(
+                      "p-6 text-left border transition-all flex flex-col gap-2",
+                      !ev.open && "opacity-50 cursor-not-allowed",
+                      ev.open && eventId === ev.eventId
+                        ? "bg-cyan-500/10 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.15)]"
+                        : "bg-white/5 border-white/10",
+                      ev.open && eventId !== ev.eventId && "hover:border-white/30",
+                    )}
+                  >
+                    <span className="text-lg font-bold">{ev.name}</span>
+                    <span className="text-xs text-white/40">
+                      {teamLabel(ev)} · {ev.fee > 0 ? `₹${ev.fee} per team` : "FREE"}
+                    </span>
+                    {!ev.open && (
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
+                        Registration closed
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  );
+
+  const renderCaptainStep = () => (
+    <div className="space-y-6">
+      {stepHeading(2)}
+      {selectedEvent && (
+        <p className="text-sm text-white/60">
+          Registering for <strong className="text-white">{selectedEvent.name}</strong>
+          {isTeam ? ". You are the team captain." : "."}
+        </p>
+      )}
+      <PersonFields
+        prefix="captain"
+        person={captain}
+        errors={captainErrors}
+        visible={visibleFor(2)}
+        onChange={(f, v) => setCaptain((c) => updatePerson(c, f, v))}
+        onTouch={touch}
+      />
+      {navButtons()}
+    </div>
+  );
+
+  const renderTeamStep = () => {
+    if (!selectedEvent) return null;
+    const showMembers = !hasGames || !!game;
+    const canAdd = showMembers && bounds.min !== bounds.max && memberCount < bounds.max;
+    const canRemove = bounds.min !== bounds.max && memberCount > bounds.min;
+    const visible = visibleFor(3);
+
+    return (
+      <div className="space-y-6">
+        {stepHeading(3)}
+
+        {hasGames && (
+          <div className="space-y-2">
+            <Select
+              label="Game"
+              name="game"
+              value={game}
+              onChange={(e) => requestGame(e.target.value)}
+              options={[
+                { label: "Select game", value: "" },
+                ...selectedEvent.games.map((g) => ({
+                  label: selectedEvent.gameSizes[g] ? `${g} (${selectedEvent.gameSizes[g]} players)` : g,
+                  value: g,
+                })),
+              ]}
+              error={attempted[3] ? gameError : undefined}
+            />
+            <p className="text-[10px] text-white/40 tracking-wide">
+              Choose exactly one game. The team size depends on the game.
+            </p>
+          </div>
+        )}
+
+        {pendingGame && (
+          <div className="p-5 bg-yellow-400/5 border border-yellow-400/30 space-y-4">
+            <div className="flex gap-3 text-yellow-300 text-sm">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <p>
+                {pendingGame.game} allows fewer players than your team has. Select {pendingGame.need} member
+                {pendingGame.need > 1 ? "s" : ""} to remove, then confirm. Nobody is removed until you confirm.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {members.map((m, i) => (
+                <label key={i} className="flex items-center gap-3 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pendingGame.remove.includes(i)}
+                    onChange={() => togglePendingRemoval(i)}
+                    className="h-4 w-4 accent-cyan-500"
+                  />
+                  <span>{m.fullName.trim() || `Member ${i + 2}`}</span>
+                  {m.collegeId && <span className="font-mono text-xs text-white/40">{normalizeCollegeId(m.collegeId)}</span>}
+                </label>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={confirmGameChange}
+                disabled={pendingGame.remove.length !== pendingGame.need}
+              >
+                Remove selected and switch to {pendingGame.game}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setPendingGame(null)}>
+                Keep current game
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <Input
+            label={`Team Name${selectedEvent.teamMin === 1 && memberCount < 2 ? " (optional for a solo entry)" : ""}`}
+            name="teamName"
+            value={teamName}
+            onChange={(e) => setTeamName(e.target.value)}
+            onBlur={() => touch("teamName")}
+            placeholder="Enter team name"
+            maxLength={40}
+            autoComplete="off"
+            error={visible("teamName") ? teamNameError : undefined}
+          />
+          <p className="text-[10px] text-white/40 tracking-wide">
+            Team names must be unique within this event.
+          </p>
+        </div>
+
+        {showMembers && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-medium text-white/60 uppercase tracking-wider">
+                Team members ({memberCount}
+                {bounds.min === bounds.max ? ` of ${bounds.max}` : `, ${bounds.min} to ${bounds.max} allowed`})
+              </p>
+            </div>
+
+            <div className="p-4 bg-white/5 border border-white/10 text-sm">
+              <span className="text-[10px] uppercase tracking-widest text-cyan-400 mr-3">Captain (you)</span>
+              <span className="font-bold">{captain.fullName.trim() || "—"}</span>
+              <span className="ml-3 font-mono text-xs text-white/40">{normalizeCollegeId(captain.collegeId)}</span>
+            </div>
+
+            {members.map((m, i) => (
+              <div key={i} className="border border-white/10 bg-white/5 p-4 md:p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-widest text-white/60">Member {i + 2}</p>
+                  {canRemove && (
+                    <button
+                      type="button"
+                      onClick={() => removeMember(i)}
+                      className="text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-300"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <PersonFields
+                  prefix={`m${i}`}
+                  person={m}
+                  errors={memberErrors[i] ?? {}}
+                  visible={visible}
+                  onChange={(f, v) => updateMember(i, f, v)}
+                  onTouch={touch}
+                />
+              </div>
+            ))}
+
+            {canAdd && (
+              <Button variant="outline" onClick={addMember}>
+                + Add member
+              </Button>
+            )}
+            {attempted[3] && sizeError && <p className="text-[10px] text-red-500 uppercase tracking-tight">{sizeError}</p>}
+          </div>
+        )}
+
+        {navButtons({ nextDisabled: !!pendingGame })}
+      </div>
+    );
+  };
+
+  const renderPaymentStep = () => {
+    if (!selectedEvent) return null;
+    const link = buildUpiLink(selectedEvent.fee);
+    return (
+      <div className="space-y-6">
+        {stepHeading(4)}
+        <div className="bg-cyan-500/10 border border-cyan-500/20 p-6 md:p-8 flex flex-col items-center text-center">
+          <p className="text-sm text-white/60 mb-2 uppercase tracking-widest">Entry fee for {selectedEvent.name}</p>
+          <p className="text-5xl font-display font-bold text-white mb-2">₹{selectedEvent.fee}</p>
+          <p className="text-xs text-white/40 mb-8">Per team, paid once.</p>
+
+          <div className="w-full max-w-sm space-y-4 mb-8">
+            <div className="bg-white p-4 md:p-6 rounded-lg shadow-inner flex flex-col items-center gap-4">
+              <QRCodeCanvas
+                value={link}
+                size={220}
+                level="H"
+                includeMargin={true}
+                style={{ maxWidth: "100%", height: "auto" }}
+              />
+              <a
+                href={link}
+                className="rounded-lg bg-cyan-500 px-6 py-3 font-bold text-white hover:bg-cyan-400 transition"
+              >
+                PAY ₹{selectedEvent.fee} USING UPI
+              </a>
+              <p className="text-sm text-gray-500 text-center">
+                Scan the QR code with any UPI app, or tap the button on your phone.
+              </p>
+              <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+                <span className="text-[11px] font-mono font-bold text-slate-700 break-all">{UPI_ID}</span>
+                <button
+                  type="button"
+                  onClick={() => void copyText(UPI_ID, setCopiedUpi)}
+                  className="text-[10px] text-cyan-600 font-bold uppercase hover:text-cyan-700"
+                >
+                  {copiedUpi ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full text-left space-y-6">
+            <div className="space-y-2">
+              <Input
+                label="UTR / UPI Reference Number (12 digits)"
+                name="utr"
+                inputMode="numeric"
+                value={utr}
+                onChange={(e) => setUtr(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                onBlur={() => touch("utr")}
+                placeholder="e.g. 412345678901"
+                maxLength={12}
+                autoComplete="off"
+                error={attempted[4] || touched["utr"] ? (utrValid ? undefined : "UTR must be exactly 12 digits.") : undefined}
+              />
+              <p className="text-[10px] text-white/40 tracking-wide leading-relaxed">
+                Find it in your payment app under the transaction details, labelled &quot;UTR&quot;, &quot;UPI Ref No.&quot; or
+                &quot;Transaction ID&quot;. It is 12 digits long.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-400">
+                Upload Payment Screenshot (JPG or PNG, max 2 MB)
+              </label>
+              <div
+                className={cn(
+                  "relative min-h-[180px] border-2 border-dashed border-white/20 hover:border-cyan-500/50 transition-colors p-6 flex flex-col items-center justify-center",
+                  (shotError || (attempted[4] && !shot)) && "border-red-500/50",
+                )}
+              >
+                <input
+                  type="file"
+                  aria-label="Payment screenshot"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => void onShotChange(e)}
+                  accept="image/png,image/jpeg"
+                />
+                {shot ? (
+                  <div className="relative w-full aspect-video bg-black/40">
+                    <img src={shot.preview} alt="Payment screenshot preview" className="w-full h-full object-contain" />
+                    <button
+                      type="button"
+                      aria-label="Remove screenshot"
+                      onClick={() => setShot(null)}
+                      className="absolute top-2 right-2 z-10 p-1 bg-red-500 rounded-full"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2 pointer-events-none">
+                    <Upload className="w-8 h-8 text-white/20" />
+                    <p className="text-sm text-white/40">Click or drag a screenshot here</p>
+                  </div>
+                )}
+              </div>
+              {shotError && <p className="text-[10px] text-red-500 uppercase tracking-tight">{shotError}</p>}
+              {!shotError && attempted[4] && !shot && (
+                <p className="text-[10px] text-red-500 uppercase tracking-tight">Payment screenshot is required.</p>
+              )}
+            </div>
+          </div>
+        </div>
+        {navButtons()}
+      </div>
+    );
+  };
+
+  const renderReviewStep = () => {
+    if (!selectedEvent) return null;
+    const people = [captain, ...members];
+    return (
+      <div className="space-y-6">
+        {stepHeading(5)}
+
+        {!selectedEvent.open && (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+            Registration for {selectedEvent.name} has closed.
+          </div>
+        )}
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="p-4 bg-white/5 border border-white/5">
+            <p className="text-[10px] uppercase text-white/40">Event</p>
+            <p className="text-sm font-bold">{selectedEvent.name}</p>
+          </div>
+          <div className="p-4 bg-white/5 border border-white/5">
+            <p className="text-[10px] uppercase text-white/40">{isTeam ? "Team" : "Entry"}</p>
+            <p className="text-sm font-bold">{isTeam ? teamNameClean || "Solo entry" : "Solo"}</p>
+          </div>
+          {hasGames && (
+            <div className="p-4 bg-white/5 border border-white/5">
+              <p className="text-[10px] uppercase text-white/40">Game</p>
+              <p className="text-sm font-bold">{game}</p>
+            </div>
+          )}
+          {needsPay && (
+            <div className="p-4 bg-white/5 border border-white/5">
+              <p className="text-[10px] uppercase text-white/40">Payment</p>
+              <p className="text-sm font-bold">
+                ₹{selectedEvent.fee} · UTR <span className="font-mono">{utr}</span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 bg-white/5 border border-white/5 space-y-3">
+          <p className="text-[10px] uppercase text-white/40">{isTeam ? `Players (${people.length})` : "Participant"}</p>
+          {people.map((p, i) => (
+            <div key={i} className="flex flex-col sm:flex-row sm:justify-between gap-1 text-sm border-b border-white/5 pb-2 last:border-0 last:pb-0">
+              <span className="font-bold">
+                {p.fullName.trim()}
+                {i === 0 && isTeam && <span className="ml-2 text-[10px] text-cyan-400 uppercase">Captain</span>}
+              </span>
+              <span className="font-mono text-xs text-white/50">
+                {normalizeCollegeId(p.collegeId)} · {p.branch} · {p.year}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <label className="flex items-start gap-3 p-4 bg-cyan-500/5 border border-cyan-500/20 text-xs text-white/70 leading-relaxed cursor-pointer">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-500"
+          />
+          <span>
+            I confirm that {isTeam ? "all the members listed above have" : "I have"} agreed to share their details (name,
+            College ID, email and phone) with the TechSpardha organizers, and that I accept the event rules. College ID
+            cards are checked at entry.
+          </span>
+        </label>
+        {attempted[5] && !consent && (
+          <p className="text-[10px] text-red-500 uppercase tracking-tight">Please confirm to continue.</p>
+        )}
+
+        {!allValid && selectedEvent.open && (
+          <p className="text-xs text-yellow-400/80">
+            Some details are incomplete. Use Back to check each step before submitting.
+          </p>
+        )}
+
+        {submitError && (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 flex gap-3 text-sm">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <div className="space-y-2">
+              {submitError.list.length ? (
+                <ul className="list-disc pl-4 space-y-1">
+                  {submitError.list.map((m, i) => (
+                    <li key={i}>{m}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>{submitError.message}</p>
+              )}
+              {submitError.list.length > 0 && <p className="text-xs text-red-300/80">Use Back to correct the details above. Nothing was saved.</p>}
+            </div>
+          </div>
+        )}
+
+        {loading && slow && (
+          <p className="text-xs text-yellow-400/80">
+            This is taking longer than usual. Please wait and do not re-enter your details or refresh the page.
+          </p>
+        )}
+
+        <div className="flex justify-between pt-4 gap-4">
+          <Button variant="outline" onClick={goBack} disabled={loading}>
+            <ChevronLeft className="mr-2 h-4 w-4" /> Back
+          </Button>
+          <Button
+            variant="secondary"
+            size="lg"
+            className="flex-1"
+            onClick={() => void handleSubmit()}
+            isLoading={loading}
+            disabled={loading || !allValid}
+          >
+            {submitError?.retry ? "Retry" : "Confirm Registration"}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSuccess = () => {
+    if (!success) return null;
+    const pending = success.paymentStatus === "pending_verification";
+    return (
+      <div className="text-center py-8 space-y-8">
+        <div className="flex justify-center">
+          <div className="w-24 h-24 bg-green-500/20 border border-green-500/50 rounded-full flex items-center justify-center">
+            <CheckCircle2 className="w-12 h-12 text-green-500" />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h3 className="text-3xl font-display font-bold uppercase">Registration Received</h3>
+          <p className="text-xs text-white/50 uppercase tracking-widest">Your registration ID</p>
+          <div className="flex items-center justify-center gap-3">
+            <span className="text-4xl md:text-5xl font-mono font-bold text-cyan-400 tracking-wider">{success.regId}</span>
+            <button
+              type="button"
+              aria-label="Copy registration ID"
+              onClick={() => void copyText(success.regId, setCopiedReg)}
+              className="p-2 border border-white/20 hover:bg-white/5"
+            >
+              {copiedReg ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="max-w-md mx-auto p-6 md:p-8 bg-white/5 border border-white/10 space-y-4 text-left">
+          <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+            <span className="text-xs text-white/40 uppercase">Event</span>
+            <span className="text-sm font-bold text-right">{success.eventName}</span>
+          </div>
+          {success.teamName && (
+            <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+              <span className="text-xs text-white/40 uppercase">Team</span>
+              <span className="text-sm font-bold text-right">{success.teamName}</span>
+            </div>
+          )}
+          {success.game && (
+            <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+              <span className="text-xs text-white/40 uppercase">Game</span>
+              <span className="text-sm font-bold text-right">{success.game}</span>
+            </div>
+          )}
+          <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+            <span className="text-xs text-white/40 uppercase">Players</span>
+            <span className="text-sm font-bold">{success.teamSize}</span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-xs text-white/40 uppercase">Status</span>
+            <span
+              className={cn(
+                "text-xs font-bold uppercase px-2 py-0.5",
+                pending ? "text-yellow-400 bg-yellow-400/10" : "text-green-400 bg-green-400/10",
+              )}
+            >
+              {pending ? "Pending verification" : "Confirmed"}
+            </span>
+          </div>
+        </div>
+
+        <p className="text-xs text-white/50 max-w-md mx-auto leading-relaxed">
+          {pending
+            ? "Your registration is confirmed only after the organizers verify your payment. "
+            : ""}
+          Keep your registration ID safe and carry your college ID card. Cards are checked at entry.
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <Button variant="secondary" onClick={() => window.print()}>
+            Download Confirmation
+          </Button>
+          <Button variant="outline" onClick={startAnother}>
+            Register for another event
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   const renderStep = () => {
+    if (success) return renderSuccess();
     switch (step) {
       case 1:
-        return (
-          <div className="space-y-6">
-            <h3 className="text-xl font-bold uppercase tracking-wider mb-8">
-              Step 1: Select Your Event
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {events.map((ev) => (
-                <button
-                  key={ev.id}
-                  onClick={() => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      eventId: ev.id,
-                      eventName: ev.name,
-                      category: ev.category,
-                      format: ev.format,
-                      paymentRequired: ev.fee > 0,
-                      paymentAmount: ev.fee,
-                    }));
-                    setStep(2);
-                  }}
-                  className={cn(
-                    "p-6 text-left border transition-all flex flex-col gap-2",
-                    formData.eventId === ev.id
-                      ? "bg-cyan-500/10 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.15)]"
-                      : "bg-white/5 border-white/10 hover:border-white/30",
-                  )}
-                >
-                  <span className="text-[10px] font-mono text-cyan-500 uppercase">
-                    #{ev.id} · {ev.category}
-                  </span>
-                  <span className="text-lg font-bold">{ev.name}</span>
-                  <span className="text-xs text-white/40">
-                    {ev.format} · {ev.fee > 0 ? `₹${ev.fee}` : "FREE"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-
+        return renderEventStep();
       case 2:
-        return (
-          <div className="space-y-6">
-            <h3 className="text-xl font-bold uppercase tracking-wider mb-8">
-              Step 2: Participant Details
-            </h3>
-            <div className="grid md:grid-cols-2 gap-6">
-              <Input
-                label="Full Name"
-                name="fullName"
-                value={formData.fullName}
-                onChange={handleInputChange}
-                placeholder="Enter your full name"
-                required
-              />
-              <Input
-                label="College Email Address"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                placeholder="yourname@example.com"
-                required
-              />
-              <Input
-                label="Mobile Number"
-                name="phone"
-                value={formData.phone}
-                onChange={handleInputChange}
-                placeholder="10-digit phone number"
-                required
-              />
-              <Input
-                label="College / Institution"
-                name="college"
-                value={formData.college}
-                onChange={handleInputChange}
-                placeholder="Your college name"
-                required
-              />
-              <Input
-                label="Student ID / Enrollment"
-                name="studentId"
-                value={formData.studentId}
-                onChange={handleInputChange}
-                placeholder="University Roll No."
-                required
-              />
-              <Select
-                label="Current Year"
-                name="year"
-                value={formData.year}
-                onChange={handleInputChange}
-                options={[
-                  { label: "1st Year", value: "1st Year" },
-                  { label: "2nd Year", value: "2nd Year" },
-                  { label: "3rd Year", value: "3rd Year" },
-                  { label: "4th Year", value: "4th Year" },
-                ]}
-              />
-              <Input
-                label="Branch / Department"
-                name="branch"
-                value={formData.branch}
-                onChange={handleInputChange}
-                placeholder="e.g. CSE, ECE, IT"
-                required
-              />
-            </div>
-            <div className="flex justify-between pt-8">
-              <Button variant="outline" onClick={prevStep}>
-                <ChevronLeft className="mr-2" /> Back
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={nextStep}
-                disabled={
-                  !formData.fullName || !formData.email || !formData.studentId
-                }
-              >
-                Next <ChevronRight className="ml-2" />
-              </Button>
-            </div>
-          </div>
-        );
-
+        return renderCaptainStep();
       case 3:
-        if (selectedEvent?.format === "Solo") {
-          setStep(4);
-          return null;
-        }
-        return (
-          <div className="space-y-6">
-            <h3 className="text-xl font-bold uppercase tracking-wider mb-8">
-              Step 3: Team Details
-            </h3>
-            <p>
-              {" "}
-              In Gamer Fiesta 2.0, there are three gaming categories: BGMI,
-              Valorant, and Free Fire. Please mention the game name along with
-              your team name in the following format:<br></br>
-              Team Name – Game Name <br></br>
-              Example: If your team name is XYZ and you want to participate in
-              BGMI, enter your team name as:<br></br>
-              XYZ-BGMI<br></br>
-              Similarly:<br></br>- XYZ-VALORANT<br></br>- XYZ-FREE FIRE<br></br>
-              Please make sure to follow this format while registering.
-            </p>
-            <div className="space-y-6">
-              <Input
-                label="Team Name"
-                name="teamName"
-                value={formData.teamName}
-                onChange={handleInputChange}
-                placeholder="Enter team name"
-              />
-              <Input
-                label="Team Captain Name"
-                name="teamCaptain"
-                value={formData.teamCaptain}
-                onChange={handleInputChange}
-                placeholder="Captain name"
-              />
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-white/60 uppercase tracking-wider">
-                  Team Members (Optional)
-                </label>
-                <textarea
-                  className="w-full h-32 bg-white/5 border border-white/10 p-4 text-sm focus:border-cyan-500/50 outline-none"
-                  placeholder="Enter other team members' names and details..."
-                  value={formData.teamMembers?.join("\n")}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      teamMembers: e.target.value.split("\n"),
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="flex justify-between pt-8">
-              <Button variant="outline" onClick={prevStep}>
-                <ChevronLeft className="mr-2" /> Back
-              </Button>
-              <Button variant="secondary" onClick={nextStep}>
-                Next <ChevronRight className="ml-2" />
-              </Button>
-            </div>
-          </div>
-        );
-
+        return renderTeamStep();
       case 4:
-        if (!selectedEvent?.fee) {
-          setStep(5);
-          return null;
-        }
-        return (
-          <div className="space-y-6">
-            <h3 className="text-xl font-bold uppercase tracking-wider mb-8">
-              Step 4: Payment Verification
-            </h3>
-            <div className="bg-cyan-500/10 border border-cyan-500/20 p-8 flex flex-col items-center text-center">
-              <p className="text-sm text-white/60 mb-2 uppercase tracking-widest">
-                Entry Fee for {selectedEvent.name}
-              </p>
-              <p className="text-5xl font-display font-bold text-white mb-8">
-                ₹{selectedEvent.fee}
-              </p>
-
-              <div className="w-full max-w-sm space-y-4 mb-8">
-                <div className="bg-white p-6 rounded-lg shadow-inner flex flex-col items-center">
-                  <div className="flex flex-col items-center gap-4">
-                    {/* QR Code */}
-                    <div className="max-w-full  rounded-xl flex flex-col items-center justify-center p-6">
-                      <QRCodeCanvas
-                        value={`upi://pay?pa=akshayspn12@okicici&pn=TechSpardha%202K26&am=${selectedEvent.fee}&cu=INR&tn=TechSpardha%202K26%20Registration`}
-                        size={320}
-                        level="H"
-                        includeMargin={true}
-                      />
-
-                      {/* UPI ID below QR */}
-                      <p className="mt-4 text-cyan-500 font-bold text-lg">
-                        akshayspn12@okicici
-                      </p>
-                    </div>
-
-                    {/* Pay Button */}
-                    <a
-                      href={`upi://pay?pa=akshayspn12@okicici&pn=TechSpardha%202K26&am=${selectedEvent.fee}&cu=INR&tn=TechSpardha%202K26%20Registration`}
-                      className="rounded-lg bg-cyan-500 px-6 py-3 font-bold text-white hover:bg-cyan-400 transition"
-                    >
-                      PAY ₹{selectedEvent.fee} USING UPI
-                    </a>
-
-                    <p className="text-sm text-gray-400 text-center">
-                      Scan the QR code using any UPI app
-                      <br />
-                      or tap the button on your mobile to pay.
-                    </p>
-                  </div>
-                  <div className="mt-4 flex flex-col items-center gap-2">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-                      Official UPI Scan
-                    </p>
-                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
-                      <span className="text-[10px] font-mono font-bold text-slate-700">
-                        akshayspn12@okicici
-                      </span>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText("akshayspn12@okicici");
-                          alert("UPI ID copied to clipboard");
-                        }}
-                        className="text-[10px] text-cyan-600 font-bold uppercase hover:text-cyan-700"
-                      >
-                        Copy
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <p className="text-xs text-white/40 italic">
-                  Scan to pay ₹{selectedEvent.fee} or use the UPI ID above
-                </p>
-              </div>
-
-              <div className="w-full text-left space-y-4">
-                <label className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-400">
-                  Upload Payment Screenshot
-                </label>
-                <div className="relative border-2 border-dashed border-white/20 hover:border-cyan-500/50 transition-colors p-8 flex flex-col items-center justify-center cursor-pointer">
-                  <input
-                    type="file"
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    onChange={handleScreenshotUpload}
-                    accept="image/*"
-                  />
-                  {screenshot ? (
-                    <div className="relative w-full aspect-video bg-black/40">
-                      <img
-                        src={screenshot.preview}
-                        alt="Preview"
-                        className="w-full h-full object-contain"
-                      />
-                      <button
-                        onClick={() => setScreenshot(null)}
-                        className="absolute top-2 right-2 p-1 bg-red-500 rounded-full"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      <Upload className="w-8 h-8 text-white/20" />
-                      <p className="text-sm text-white/40">
-                        Click or drag to upload (Max 2MB)
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-between pt-8">
-              <Button variant="outline" onClick={prevStep}>
-                <ChevronLeft className="mr-2" /> Back
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={nextStep}
-                disabled={!screenshot}
-              >
-                Next <ChevronRight className="ml-2" />
-              </Button>
-            </div>
-          </div>
-        );
-
+        return renderPaymentStep();
       case 5:
-        return (
-          <div className="space-y-6">
-            <h3 className="text-xl font-bold uppercase tracking-wider mb-8">
-              Step 5: Review & Submit
-            </h3>
-            <div className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="p-4 bg-white/5 border border-white/5">
-                  <p className="text-[10px] uppercase text-white/40">Event</p>
-                  <p className="text-sm font-bold">{formData.eventName}</p>
-                </div>
-                <div className="p-4 bg-white/5 border border-white/5">
-                  <p className="text-[10px] uppercase text-white/40">
-                    Participant
-                  </p>
-                  <p className="text-sm font-bold">{formData.fullName}</p>
-                </div>
-                <div className="p-4 bg-white/5 border border-white/5">
-                  <p className="text-[10px] uppercase text-white/40">
-                    Student ID
-                  </p>
-                  <p className="text-sm font-bold">{formData.studentId}</p>
-                </div>
-                <div className="p-4 bg-white/5 border border-white/5">
-                  <p className="text-[10px] uppercase text-white/40">Team</p>
-                  <p className="text-sm font-bold">
-                    {formData.teamName || "Solo Entry"}
-                  </p>
-                </div>
-              </div>
-
-              {error && (
-                <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-500 flex gap-3 text-sm">
-                  <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <p>{error}</p>
-                </div>
-              )}
-
-              <div className="p-6 bg-cyan-500/5 border border-cyan-500/20 text-xs text-white/60 leading-relaxed italic">
-                By clicking submit, you agree to the event rules and acknowledge
-                that a participant ID (Roll No + Email) can register for a
-                maximum of 2 different events.
-              </div>
-            </div>
-            <div className="flex justify-between pt-8">
-              <Button variant="outline" onClick={prevStep}>
-                <ChevronLeft className="mr-2" /> Back
-              </Button>
-              <Button
-                variant="secondary"
-                size="lg"
-                className="flex-1 ml-4"
-                onClick={handleSubmit}
-                isLoading={loading}
-              >
-                Confirm Registration
-              </Button>
-            </div>
-          </div>
-        );
-
-      case 6:
-        return (
-          <div className="text-center py-12 space-y-8">
-            <div className="flex justify-center">
-              <div className="w-24 h-24 bg-green-500/20 border border-green-500/50 rounded-full flex items-center justify-center">
-                <CheckCircle2 className="w-12 h-12 text-green-500" />
-              </div>
-            </div>
-
-            <div>
-              <h3 className="text-3xl font-display font-bold uppercase mb-2">
-                Registration Successful
-              </h3>
-              <p className="text-white/60">
-                Your registration ID is{" "}
-                <span className="text-cyan-400 font-mono font-bold">
-                  {successData.registrationId}
-                </span>
-              </p>
-            </div>
-
-            <div className="max-w-md mx-auto p-8 bg-white/5 border border-white/10 space-y-6 text-left">
-              <div className="flex justify-between border-b border-white/5 pb-4">
-                <span className="text-xs text-white/40 uppercase">Event</span>
-                <span className="text-sm font-bold">
-                  {successData.eventName}
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-white/5 pb-4">
-                <span className="text-xs text-white/40 uppercase">
-                  Participant
-                </span>
-                <span className="text-sm font-bold">
-                  {successData.participantName}
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-white/5 pb-4">
-                <span className="text-xs text-white/40 uppercase">Status</span>
-                <span className="text-xs font-bold text-yellow-400 uppercase bg-yellow-400/10 px-2 py-0.5">
-                  {successData.paymentStatus}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button variant="secondary" onClick={() => window.print()}>
-                Download Confirmation
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setStep(1);
-                  setFormData({ ...formData, eventId: "" });
-                  setSuccessData(null);
-                  setScreenshot(null);
-                }}
-              >
-                Register for another event
-              </Button>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
+        return renderReviewStep();
     }
   };
 
@@ -598,17 +1223,25 @@ export const RegistrationForm: React.FC = () => {
             </p>
           </div>
 
-          <div className="bg-neutral-900 border border-white/10 p-8 md:p-12 relative">
-            {/* Step Indicator */}
-            {step < 6 && (
+          {notice && (
+            <div
+              role="status"
+              className="mb-6 flex items-start justify-between gap-4 p-4 bg-yellow-400/5 border border-yellow-400/30 text-sm text-yellow-300"
+            >
+              <p>{notice}</p>
+              <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <div ref={cardRef} className="bg-neutral-900 border border-white/10 p-5 sm:p-8 md:p-12 relative scroll-mt-24">
+            {!success && (
               <div className="flex items-center gap-4 mb-12">
-                {[1, 2, 3, 4, 5].map((s) => (
+                {steps.map((s) => (
                   <div
                     key={s}
-                    className={cn(
-                      "flex-1 h-1 transition-all duration-500",
-                      step >= s ? "bg-cyan-500" : "bg-white/10",
-                    )}
+                    className={cn("flex-1 h-1 transition-all duration-500", step >= s ? "bg-cyan-500" : "bg-white/10")}
                   />
                 ))}
               </div>
@@ -616,7 +1249,7 @@ export const RegistrationForm: React.FC = () => {
 
             <AnimatePresence mode="wait">
               <motion.div
-                key={step}
+                key={success ? "success" : step}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}

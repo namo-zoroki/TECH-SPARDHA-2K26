@@ -2,33 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Button } from './ui/Button';
 import { Calendar, MapPin } from 'lucide-react';
+// Imported so the build bundles the image and gives it the right production URL.
+import heroBackground from '@/src/assets/images/tech_background_circuit_1791108983180.jpg';
+
+const TARGET_DATE = new Date('2026-10-23T00:00:00+05:30').getTime();
+
+const getTimeLeft = () => {
+  const distance = Math.max(0, TARGET_DATE - Date.now());
+  return {
+    days: Math.floor(distance / (1000 * 60 * 60 * 24)),
+    hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+    minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+    seconds: Math.floor((distance % (1000 * 60)) / 1000),
+  };
+};
 
 export const Hero: React.FC = () => {
-  const [timeLeft, setTimeLeft] = useState({
-    days: 0,
-    hours: 0,
-    minutes: 0,
-    seconds: 0,
-  });
+  const [timeLeft, setTimeLeft] = useState(getTimeLeft);
 
   useEffect(() => {
-    const targetDate = new Date('2026-10-23T00:00:00+05:30').getTime();
-
     const interval = setInterval(() => {
-      const now = new Date().getTime();
-      const distance = targetDate - now;
-
-      if (distance < 0) {
-        clearInterval(interval);
-        return;
-      }
-
-      setTimeLeft({
-        days: Math.floor(distance / (1000 * 60 * 60 * 24)),
-        hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-        minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
-        seconds: Math.floor((distance % (1000 * 60)) / 1000),
-      });
+      setTimeLeft(getTimeLeft());
+      if (Date.now() >= TARGET_DATE) clearInterval(interval);
     }, 1000);
 
     return () => clearInterval(interval);
@@ -40,8 +35,8 @@ export const Hero: React.FC = () => {
       <div className="absolute inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-black z-10" />
         <img 
-          src="/src/assets/images/tech_background_circuit_1791108983180.jpg" 
-          alt="Background" 
+          src={heroBackground}
+          alt="" 
           className="w-full h-full object-cover opacity-40 scale-110"
         />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.1)_0%,transparent_70%)]" />
@@ -134,19 +129,19 @@ export const Hero: React.FC = () => {
             "Where Technology Meets Competition"
           </p>
 
-          {/* Countdown */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
+          {/* Countdown: four boxes in one row on every screen size */}
+          <div className="grid grid-cols-4 gap-2 sm:gap-4 md:gap-6 mb-12 w-full max-w-2xl">
             {[
               { label: 'Days', value: timeLeft.days },
               { label: 'Hours', value: timeLeft.hours },
               { label: 'Minutes', value: timeLeft.minutes },
               { label: 'Seconds', value: timeLeft.seconds },
             ].map((item) => (
-              <div key={item.label} className="flex flex-col items-center bg-white/5 backdrop-blur-sm border border-white/10 p-6 min-w-[120px]">
-                <span className="text-4xl md:text-5xl font-display font-bold text-cyan-400 tabular-nums">
+              <div key={item.label} className="flex flex-col items-center min-w-0 bg-white/5 backdrop-blur-sm border border-white/10 px-1 py-3 sm:p-5 md:p-6">
+                <span className="text-2xl sm:text-4xl md:text-5xl font-display font-bold text-cyan-400 tabular-nums">
                   {item.value.toString().padStart(2, '0')}
                 </span>
-                <span className="text-[10px] uppercase tracking-[0.2em] text-white/40 mt-2">{item.label}</span>
+                <span className="text-[8px] sm:text-[10px] uppercase tracking-[0.1em] sm:tracking-[0.2em] text-white/40 mt-2">{item.label}</span>
               </div>
             ))}
           </div>

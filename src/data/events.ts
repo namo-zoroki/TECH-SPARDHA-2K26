@@ -4,6 +4,8 @@ export interface TechEvent {
   category: string;
   format: 'Solo' | 'Team' | 'Solo / Team';
   fee: number;
+  /** Event lead shown in the event modal. Replace the placeholder once decided. */
+  lead?: string;
   description: string;
   purpose: string;
   procedure: string;
@@ -19,6 +21,8 @@ export const events: TechEvent[] = [
     category: "Technical",
     format: "Solo / Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "1–2 members",
     description: "Coding challenge focused on logic, problem solving, debugging and implementation speed.",
     purpose: "To test the programming skills, logical thinking, and debugging capabilities of participants.",
     procedure: "Multiple rounds including logic testing, debugging, and rapid implementation challenges.",
@@ -41,6 +45,8 @@ export const events: TechEvent[] = [
     category: "Robotics",
     format: "Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "2–4 members",
     description: "Robotics challenge involving design, control, navigation, stability and speed.",
     purpose: "To showcase engineering precision, mechanical design, and control efficiency in robotics.",
     procedure: "Robots must navigate a challenging track with obstacles in the shortest possible time.",
@@ -58,11 +64,13 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "03",
+    id: "04",
     name: "AI Build Arena",
     category: "Artificial Intelligence",
     format: "Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "2–4 members",
     description: "Teams build a working AI prototype around a defined problem/theme.",
     purpose: "To encourage the practical application of AI and Machine Learning to solve real-world problems.",
     procedure: "Teams will be given a theme and must develop a prototype using AI frameworks within the time limit.",
@@ -80,11 +88,13 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "04",
+    id: "06",
     name: "Cyber Hunt: The Digital Heist",
     category: "Cybersecurity",
     format: "Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "2–4 members",
     description: "Cybersecurity challenge involving investigation, logical reasoning, digital clues and practical security concepts.",
     purpose: "To simulate real-world cybersecurity scenarios and test investigative skills.",
     procedure: "A series of digital clues and challenges that require cybersecurity knowledge to solve.",
@@ -102,11 +112,13 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "05",
+    id: "03",
     name: "Ideathon: Problem to Prototype",
     category: "Innovation",
     format: "Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "2–4 members",
     description: "Teams identify/receive a real-world problem and develop a feasible solution/prototype concept.",
     purpose: "To foster entrepreneurial thinking and innovative problem-solving.",
     procedure: "Pitching of ideas followed by a prototype concept demonstration.",
@@ -124,11 +136,13 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "06",
+    id: "05",
     name: "UI/UX Blitz",
     category: "Design",
     format: "Solo / Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "1–2 members",
     description: "Rapid design challenge focused on UX, interface quality, usability, visual hierarchy and communication.",
     purpose: "To challenge designers to create intuitive and aesthetically pleasing user interfaces.",
     procedure: "Participants will design a mobile or web interface for a given problem statement.",
@@ -146,11 +160,13 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "07",
+    id: "10",
     name: "Tech Treasure Hunt",
     category: "Mass Participation",
     format: "Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "3–5 members",
     description: "Campus-wide technical treasure hunt involving clues, technology knowledge, observation, navigation and teamwork.",
     purpose: "To engage participants in a fun, technology-themed scavenger hunt.",
     procedure: "Teams solve technical riddles to find locations and eventually the final treasure.",
@@ -173,6 +189,8 @@ export const events: TechEvent[] = [
     category: "E-Sports",
     format: "Team",
     fee: 200,
+    lead: "To be announced",
+    teamSize: "Valorant 5 · BGMI 4 · Free Fire 4",
     description: "Competitive gaming tournament focused on fair play, teamwork, match discipline and transparent tournament progression.",
     purpose: "To provide a platform for competitive e-sports enthusiasts to showcase their skills.",
     procedure: "Bracket-based tournament with strict match timings.",
@@ -190,11 +208,13 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "09",
+    id: "07",
     name: "Ctrl+Alt+Defeat: Tech Wars",
     category: "Technology Quiz",
     format: "Solo / Team",
     fee: 0,
+    lead: "To be announced",
+    teamSize: "1–2 members",
     description: "Technology quiz covering computing awareness, logic, emerging technologies, cybersecurity, programming and technical knowledge.",
     purpose: "To test the breadth and depth of technical knowledge among students.",
     procedure: "Buzzer rounds and rapid-fire questions on various tech domains.",
@@ -212,11 +232,12 @@ export const events: TechEvent[] = [
     ]
   },
   {
-    id: "10",
+    id: "09",
     name: "CEO Quest",
     category: "Management",
     format: "Solo",
     fee: 0,
+    lead: "To be announced",
     description: "Management challenge covering business judgment, leadership, communication, strategy and decision making.",
     purpose: "To identify future leaders through business simulations and decision-making scenarios.",
     procedure: "Participants face management crises and must provide strategic solutions.",
@@ -239,7 +260,8 @@ export const events: TechEvent[] = [
     category: "Reel Coverage & Media",
     format: "Team",
     fee: 0,
-    teamSize: "2–4 members",
+    lead: "To be announced",
+    teamSize: "2 members (duo)",
     description: "Teams create short-form reels covering the TECHSPARDHA experience, competitions, participants, technology, atmosphere and highlights.",
     purpose: "To document the fest's energy and highlights through creative short-form video content.",
     procedure: "Teams capture footage throughout the fest and submit a final edited reel.",
