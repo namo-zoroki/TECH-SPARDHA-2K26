@@ -33,19 +33,23 @@ export const EventModal: React.FC<EventModalProps> = ({ event, onClose }) => {
             className="relative w-full max-w-4xl max-h-[90vh] bg-neutral-900 border border-white/10 overflow-y-auto overflow-x-hidden"
           >
             {/* Header */}
-            <div className="sticky top-0 z-10 bg-neutral-900/80 backdrop-blur-md border-b border-white/10 p-6 md:p-8 flex items-center justify-between">
+            <div className="sticky top-0 z-10 bg-neutral-900/90 backdrop-blur-md border-b border-white/10 p-4 sm:p-6 md:p-8 flex items-center justify-between gap-4">
               <div>
-                <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-500 font-mono mb-2 block">
+                <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-500 font-mono mb-1 sm:mb-2 block">
                   {event.category}
                 </span>
-                <h2 className="text-3xl md:text-4xl font-bold uppercase">{event.name}</h2>
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold uppercase">{event.name}</h2>
               </div>
-              <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors" aria-label="Close">
-                <X className="w-6 h-6" />
+              <button 
+                onClick={onClose} 
+                className="p-2 hover:bg-white/10 rounded-full transition-colors shrink-0 text-white/80 hover:text-white" 
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
             </div>
 
-            <div className="p-6 md:p-10 space-y-12">
+            <div className="p-4 sm:p-6 md:p-10 space-y-8 sm:space-y-12">
               {/* Quick Info */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
@@ -60,11 +64,21 @@ export const EventModal: React.FC<EventModalProps> = ({ event, onClose }) => {
                   </div>
                 ))}
 
-                {/* Event Lead: full-width row, shown only when the event has a lead */}
-                {event.lead && (
-                  <div className="col-span-2 md:col-span-4 bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
-                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Event Lead</p>
-                    <p className="text-sm font-bold text-white">{event.lead}</p>
+                {/* Event Lead & Coordinator in the same line */}
+                {(event.lead || event.coordinator) && (
+                  <div className="col-span-2 md:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {event.lead && (
+                      <div className="bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
+                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Event Lead</p>
+                        <p className="text-sm font-bold text-white">{event.lead}</p>
+                      </div>
+                    )}
+                    {event.coordinator && (
+                      <div className="bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
+                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Event Coordinator</p>
+                        <p className="text-sm font-bold text-white">{event.coordinator}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -126,7 +140,7 @@ export const EventModal: React.FC<EventModalProps> = ({ event, onClose }) => {
                 <Button 
                   variant="secondary" 
                   size="lg" 
-                  className="w-full md:w-auto min-w-[300px]"
+                  className="w-full sm:w-auto sm:min-w-[280px]"
                   onClick={() => {
                     onClose();
                     const el = document.getElementById('registration');

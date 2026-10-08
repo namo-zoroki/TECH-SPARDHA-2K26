@@ -34,7 +34,7 @@ export default function App() {
           <div className="container-width px-6 flex justify-between items-center">
             <a href="/" className="flex items-center gap-4 group">
               <div className="h-10 w-10 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <img src="/assets/techspardha.png" alt="Logo" className="w-full h-full object-contain" />
+                <img src="/assets/techspardha.webp" alt="Logo" className="w-full h-full object-contain" />
               </div>
               <span className="text-xl font-display font-bold tracking-tighter flex items-center">
                 GENESIS <span className="text-xs text-white/40 ml-2 pt-1 uppercase">Admin</span>
@@ -68,7 +68,7 @@ export default function App() {
       <Footer />
 
       {/* Dynamic scanlines overlay for futuristic feel */}
-      <div className="fixed inset-0 pointer-events-none z-[60] opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%]" />
+      <div className="fixed inset-0 pointer-events-none z-[60] opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] print:hidden" />
     </div>
   );
 }

@@ -58,7 +58,7 @@ export const Hero: React.FC = () => {
               className="w-16 h-16 md:w-24 md:h-24 flex items-center justify-center"
             >
               <img 
-                src="/assets/ims.png" 
+                src="/assets/ims.webp" 
                 alt="IMS Engineering College" 
                 className="w-full h-full object-contain" 
               />
@@ -73,7 +73,7 @@ export const Hero: React.FC = () => {
               className="w-16 h-16 md:w-24 md:h-24 flex items-center justify-center"
             >
               <img 
-                src="/assets/genesis.png" 
+                src="/assets/genesis.webp" 
                 alt="Genesis Technical Team" 
                 className="w-full h-full object-contain" 
               />
@@ -88,18 +88,18 @@ export const Hero: React.FC = () => {
               className="w-16 h-16 md:w-24 md:h-24 flex items-center justify-center"
             >
               <img 
-                src="/assets/techspardha.png" 
+                src="/assets/techspardha.webp" 
                 alt="TechSpardha 2K26" 
                 className="w-full h-full object-contain" 
               />
             </motion.div>
           </div>
 
-          <p className="text-cyan-500 font-mono text-sm tracking-[0.5em] uppercase mb-4">
+          <p className="text-cyan-500 font-mono text-xs sm:text-sm tracking-[0.25em] sm:tracking-[0.5em] uppercase mb-4">
             IMS Engineering College Presents
           </p>
           
-          <h1 className="text-6xl md:text-[140px] font-display font-bold leading-none tracking-tighter mb-6 relative">
+          <h1 className="text-5xl sm:text-6xl md:text-[140px] font-display font-bold leading-none tracking-tighter mb-6 relative">
             <motion.span 
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -122,10 +122,10 @@ export const Hero: React.FC = () => {
               transition={{ duration: 1, delay: 1.2 }}
               className="absolute -bottom-2 left-0 h-1 bg-gradient-to-r from-cyan-500 to-transparent"
             />
-            <span className="block text-2xl md:text-5xl mt-6 text-white/40 tracking-[0.3em] font-mono font-normal">2K26</span>
+            <span className="block text-xl sm:text-2xl md:text-5xl mt-4 sm:mt-6 text-white/40 tracking-[0.2em] sm:tracking-[0.3em] font-mono font-normal">2K26</span>
           </h1>
 
-          <p className="text-xl md:text-2xl text-white/60 mb-12 max-w-2xl font-light">
+          <p className="text-lg sm:text-xl md:text-2xl text-white/60 mb-8 sm:mb-12 max-w-2xl font-light px-2">
             "Where Technology Meets Competition"
           </p>
 

@@ -8,18 +8,11 @@ import { Trophy, Gamepad2, Rocket } from 'lucide-react';
 
 export const Events: React.FC = () => {
   const [selectedEvent, setSelectedEvent] = useState<TechEvent | null>(null);
-  const [filter, setFilter] = useState('All');
-
-  const categories = ['All', ...new Set(events.map(e => e.category))];
-
-  const filteredEvents = filter === 'All' 
-    ? events 
-    : events.filter(e => e.category === filter);
 
   return (
     <section id="events" className="section-padding bg-neutral-950">
       <div className="container-width">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-16">
+        <div className="mb-16">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -33,30 +26,13 @@ export const Events: React.FC = () => {
               Explore 11 high-octane competitions across diverse domains. From code debugging to campus-wide treasure hunts, find your battleground.
             </p>
           </motion.div>
-
-          {/* Filter Controls - Button style as per guidelines */}
-          <div className="flex flex-wrap gap-2 p-1 bg-white/5 border border-white/10 overflow-x-auto no-scrollbar">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setFilter(cat)}
-                className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${
-                  filter === cat 
-                    ? 'bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)]' 
-                    : 'text-white/40 hover:text-white'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
         </div>
 
         <motion.div 
           layout
           className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
         >
-          {filteredEvents.map((event) => (
+          {events.map((event) => (
             <EventCard 
               key={event.id} 
               event={event} 

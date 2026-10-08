@@ -12,11 +12,17 @@
 
 @layer base {
   html {
+    color-scheme: dark;
     scroll-behavior: smooth;
   }
 
   body {
     @apply bg-black text-white antialiased;
+    color-scheme: dark;
+  }
+
+  input, select, textarea, option {
+    color-scheme: dark;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -61,4 +67,75 @@
 
 ::-webkit-scrollbar-thumb {
   @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+}
+
+/* ------------------------------------------------------------------
+   Registration confirmation slip
+   The slip (#printable-slip) is rendered by RegistrationForm through a
+   portal directly under <body>, so it is never visible on screen and is
+   the only thing that shows when printing / saving as PDF.
+   ------------------------------------------------------------------ */
+
+/* On screen: the slip never shows */
+#printable-slip {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    color-scheme: light !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Remove the whole website (navbar, hero, about, events, rules, contact,
+     scanlines, overlays, buttons...) from the layout, not just hide it.
+     This is what stops blank pages and a slip that starts halfway down. */
+  body > *:not(#printable-slip) {
+    display: none !important;
+  }
+
+  /* The slip: a normal block at the top of page 1, white page, crisp text */
+  #printable-slip {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  #printable-slip * {
+    text-shadow: none !important;
+    box-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Keep blocks and table rows from splitting across pages */
+  #printable-slip .slip-block,
+  #printable-slip tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #printable-slip thead {
+    display: table-header-group;
+  }
 }

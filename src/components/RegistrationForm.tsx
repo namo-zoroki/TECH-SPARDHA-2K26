@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { QRCodeCanvas } from "qrcode.react";
 import {
@@ -1114,83 +1115,240 @@ export const RegistrationForm: React.FC = () => {
     );
   };
 
-  const renderSuccess = () => {
-    if (!success) return null;
-    const pending = success.paymentStatus === "pending_verification";
+  // -------------------------------------------------------------------------
+  // Printable confirmation slip.
+  // It is rendered through a portal straight into <body> (outside #root) so the print
+  // stylesheet can hide the entire website with `body > *:not(#printable-slip)` and the
+  // slip starts at the top of page 1. On screen it is display:none (see index.css).
+  // -------------------------------------------------------------------------
+
+  const renderPrintableSlip = (s: RegisterSuccess) => {
+    const pending = s.paymentStatus === "pending_verification";
+    const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+    const th = "border border-neutral-400 p-2 text-left font-semibold";
+    const td = "border border-neutral-300 p-2 align-top";
+
     return (
-      <div className="text-center py-8 space-y-8">
-        <div className="flex justify-center">
-          <div className="w-24 h-24 bg-green-500/20 border border-green-500/50 rounded-full flex items-center justify-center">
-            <CheckCircle2 className="w-12 h-12 text-green-500" />
+      <div id="printable-slip" className="bg-white text-black font-sans text-left">
+        {/* Header: official branding */}
+        <div className="slip-block flex justify-between items-start gap-6 border-b-2 border-black pb-4 mb-5">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-neutral-600 font-semibold">
+              IMS Engineering College, Ghaziabad
+            </p>
+            <h1 className="text-3xl font-bold uppercase tracking-tight mt-1 text-black">TECHSPARDHA 2K26</h1>
+            <p className="text-xs text-neutral-600 mt-1">
+              Organized by GENESIS Technical Society · 23–24 October 2026
+            </p>
+            <p className="text-xs font-bold uppercase tracking-widest mt-3 text-black">Registration Confirmation Slip</p>
           </div>
-        </div>
 
-        <div className="space-y-4">
-          <h3 className="text-3xl font-display font-bold uppercase">Registration Received</h3>
-          <p className="text-xs text-white/50 uppercase tracking-widest">Your registration ID</p>
-          <div className="flex items-center justify-center gap-3">
-            <span className="text-4xl md:text-5xl font-mono font-bold text-cyan-400 tracking-wider">{success.regId}</span>
-            <button
-              type="button"
-              aria-label="Copy registration ID"
-              onClick={() => void copyText(success.regId, setCopiedReg)}
-              className="p-2 border border-white/20 hover:bg-white/5"
-            >
-              {copiedReg ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
-            </button>
-          </div>
-        </div>
-
-        <div className="max-w-md mx-auto p-6 md:p-8 bg-white/5 border border-white/10 space-y-4 text-left">
-          <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
-            <span className="text-xs text-white/40 uppercase">Event</span>
-            <span className="text-sm font-bold text-right">{success.eventName}</span>
-          </div>
-          {success.teamName && (
-            <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
-              <span className="text-xs text-white/40 uppercase">Team</span>
-              <span className="text-sm font-bold text-right">{success.teamName}</span>
-            </div>
-          )}
-          {success.game && (
-            <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
-              <span className="text-xs text-white/40 uppercase">Game</span>
-              <span className="text-sm font-bold text-right">{success.game}</span>
-            </div>
-          )}
-          <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
-            <span className="text-xs text-white/40 uppercase">Players</span>
-            <span className="text-sm font-bold">{success.teamSize}</span>
-          </div>
-          <div className="flex justify-between gap-4">
-            <span className="text-xs text-white/40 uppercase">Status</span>
+          {/* Registration box */}
+          <div className="border-2 border-black p-3 min-w-[190px] text-right">
+            <p className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">Registration ID</p>
+            <p className="text-2xl font-mono font-bold text-black tracking-wider">{s.regId}</p>
+            <p className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 mt-2">Date</p>
+            <p className="text-xs font-semibold text-black">{today}</p>
             <span
               className={cn(
-                "text-xs font-bold uppercase px-2 py-0.5",
-                pending ? "text-yellow-400 bg-yellow-400/10" : "text-green-400 bg-green-400/10",
+                "inline-block text-[10px] uppercase font-bold px-2 py-0.5 mt-2 border border-black",
+                pending ? "bg-white text-black" : "bg-black text-white",
               )}
             >
-              {pending ? "Pending verification" : "Confirmed"}
+              {pending ? "Pending Verification" : "Confirmed"}
             </span>
           </div>
         </div>
 
-        <p className="text-xs text-white/50 max-w-md mx-auto leading-relaxed">
-          {pending
-            ? "Your registration is confirmed only after the organizers verify your payment. "
-            : ""}
-          Keep your registration ID safe and carry your college ID card. Cards are checked at entry.
-        </p>
+        {/* Event summary */}
+        <div className="slip-block mb-5">
+          <h2 className="text-xs uppercase tracking-wider font-bold bg-neutral-100 p-2 border-l-4 border-black mb-3">
+            Event Summary
+          </h2>
+          <div className="grid grid-cols-2 gap-4 text-xs border border-neutral-300 p-3">
+            <div>
+              <span className="text-neutral-500 block uppercase text-[10px]">Event Name</span>
+              <span className="font-bold text-sm text-black">{s.eventName}</span>
+            </div>
+            <div>
+              <span className="text-neutral-500 block uppercase text-[10px]">Format / Team Name</span>
+              <span className="font-bold text-sm text-black">{s.teamName || (isTeam ? "Team" : "Solo")}</span>
+            </div>
+            {s.game && (
+              <div>
+                <span className="text-neutral-500 block uppercase text-[10px]">Game</span>
+                <span className="font-bold text-sm text-black">{s.game}</span>
+              </div>
+            )}
+            <div>
+              <span className="text-neutral-500 block uppercase text-[10px]">Total Participants</span>
+              <span className="font-bold text-sm text-black">{s.teamSize}</span>
+            </div>
+          </div>
+        </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <Button variant="secondary" onClick={() => window.print()}>
-            Download Confirmation
-          </Button>
-          <Button variant="outline" onClick={startAnother}>
-            Register for another event
-          </Button>
+        {/* Captain / participant */}
+        <div className="slip-block mb-5">
+          <h2 className="text-xs uppercase tracking-wider font-bold bg-neutral-100 p-2 border-l-4 border-black mb-3">
+            {isTeam ? "Team Captain Details" : "Participant Details"}
+          </h2>
+          <table className="w-full text-xs border-collapse border border-neutral-400">
+            <thead>
+              <tr className="bg-neutral-100 text-neutral-800">
+                <th className={th}>Full Name</th>
+                <th className={th}>College ID</th>
+                <th className={th}>Branch</th>
+                <th className={th}>Year</th>
+                <th className={th}>Phone</th>
+                <th className={th}>Email</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className={cn(td, "font-bold")}>{captain.fullName}</td>
+                <td className={cn(td, "font-mono")}>{normalizeCollegeId(captain.collegeId)}</td>
+                <td className={td}>{captain.branch}</td>
+                <td className={td}>{captain.year}</td>
+                <td className={td}>{captain.phone}</td>
+                <td className={cn(td, "break-all")}>{captain.email}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Team members */}
+        {isTeam && members.length > 0 && (
+          <div className="mb-5">
+            <h2 className="slip-block text-xs uppercase tracking-wider font-bold bg-neutral-100 p-2 border-l-4 border-black mb-3">
+              Team Members ({members.length})
+            </h2>
+            <table className="w-full text-xs border-collapse border border-neutral-400">
+              <thead>
+                <tr className="bg-neutral-100 text-neutral-800">
+                  <th className={th}>#</th>
+                  <th className={th}>Name</th>
+                  <th className={th}>College ID</th>
+                  <th className={th}>Branch</th>
+                  <th className={th}>Year</th>
+                  <th className={th}>Mobile</th>
+                  <th className={th}>Email</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m, idx) => (
+                  <tr key={idx}>
+                    <td className={cn(td, "text-neutral-500")}>{idx + 2}</td>
+                    <td className={cn(td, "font-medium")}>{m.fullName}</td>
+                    <td className={cn(td, "font-mono")}>{normalizeCollegeId(m.collegeId)}</td>
+                    <td className={td}>{m.branch}</td>
+                    <td className={td}>{m.year}</td>
+                    <td className={td}>{m.phone}</td>
+                    <td className={cn(td, "break-all")}>{m.email}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Instructions */}
+        <div className="slip-block mt-6 border-t border-neutral-300 pt-4 text-[11px] text-neutral-700 space-y-1">
+          <p className="font-bold uppercase text-black">Important Instructions</p>
+          {pending && (
+            <p>0. Your registration is confirmed only after the organizers verify your payment.</p>
+          )}
+          <p>1. Every participant must carry their original College ID card. Details are verified at entry.</p>
+          <p>2. Please report to the venue at least 30 minutes before the announced slot time.</p>
+          <p>3. Keep this Registration ID safe for attendance and prize distribution.</p>
+          <p className="text-[10px] text-neutral-500 pt-2">Generated on {today} · TECHSPARDHA 2K26 Official Portal</p>
         </div>
       </div>
+    );
+  };
+
+  const renderSuccess = () => {
+    if (!success) return null;
+    const pending = success.paymentStatus === "pending_verification";
+    return (
+      <>
+        {/* On-screen confirmation card (dark theme, unchanged) */}
+        <div className="text-center py-8 space-y-8">
+          <div className="flex justify-center">
+            <div className="w-24 h-24 bg-green-500/20 border border-green-500/50 rounded-full flex items-center justify-center">
+              <CheckCircle2 className="w-12 h-12 text-green-500" />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="text-3xl font-display font-bold uppercase">Registration Received</h3>
+            <p className="text-xs text-white/50 uppercase tracking-widest">Your registration ID</p>
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-4xl md:text-5xl font-mono font-bold text-cyan-400 tracking-wider">{success.regId}</span>
+              <button
+                type="button"
+                aria-label="Copy registration ID"
+                onClick={() => void copyText(success.regId, setCopiedReg)}
+                className="p-2 border border-white/20 hover:bg-white/5"
+              >
+                {copiedReg ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="max-w-md mx-auto p-6 md:p-8 bg-white/5 border border-white/10 space-y-4 text-left">
+            <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+              <span className="text-xs text-white/40 uppercase">Event</span>
+              <span className="text-sm font-bold text-right">{success.eventName}</span>
+            </div>
+            {success.teamName && (
+              <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+                <span className="text-xs text-white/40 uppercase">Team</span>
+                <span className="text-sm font-bold text-right">{success.teamName}</span>
+              </div>
+            )}
+            {success.game && (
+              <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+                <span className="text-xs text-white/40 uppercase">Game</span>
+                <span className="text-sm font-bold text-right">{success.game}</span>
+              </div>
+            )}
+            <div className="flex justify-between gap-4 border-b border-white/5 pb-3">
+              <span className="text-xs text-white/40 uppercase">Players</span>
+              <span className="text-sm font-bold">{success.teamSize}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-xs text-white/40 uppercase">Status</span>
+              <span
+                className={cn(
+                  "text-xs font-bold uppercase px-2 py-0.5",
+                  pending ? "text-yellow-400 bg-yellow-400/10" : "text-green-400 bg-green-400/10",
+                )}
+              >
+                {pending ? "Pending verification" : "Confirmed"}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-white/50 max-w-md mx-auto leading-relaxed">
+            {pending
+              ? "Your registration is confirmed only after the organizers verify your payment. "
+              : ""}
+            Keep your registration ID safe and carry your college ID card. Cards are checked at entry.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button variant="secondary" onClick={() => window.print()}>
+              Download Confirmation
+            </Button>
+            <Button variant="outline" onClick={startAnother}>
+              Register for another event
+            </Button>
+          </div>
+        </div>
+
+        {/* Print-only slip, mounted on <body> so nothing else on the site can leak into the PDF */}
+        {typeof document !== "undefined" && createPortal(renderPrintableSlip(success), document.body)}
+      </>
     );
   };
 

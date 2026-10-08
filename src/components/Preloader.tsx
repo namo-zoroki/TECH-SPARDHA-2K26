@@ -29,7 +29,7 @@ export const Preloader: React.FC = () => {
                 transition={{ delay: 0.2 }}
                 className="w-16 h-16 md:w-24 md:h-24 flex items-center justify-center"
               >
-                <img src="/assets/ims.png" alt="IMS" className="w-full h-full object-contain" />
+                <img src="/assets/ims.webp" alt="IMS" className="w-full h-full object-contain" />
               </motion.div>
               
               <motion.div
@@ -38,7 +38,7 @@ export const Preloader: React.FC = () => {
                 transition={{ delay: 0.3 }}
                 className="w-16 h-16 md:w-24 md:h-24 flex items-center justify-center"
               >
-                <img src="/assets/genesis.png" alt="GENESIS" className="w-full h-full object-contain" />
+                <img src="/assets/genesis.webp" alt="GENESIS" className="w-full h-full object-contain" />
               </motion.div>
               
               <motion.div
@@ -47,7 +47,7 @@ export const Preloader: React.FC = () => {
                 transition={{ delay: 0.4 }}
                 className="w-16 h-16 md:w-24 md:h-24 flex items-center justify-center"
               >
-                <img src="/assets/techspardha.png" alt="TECHSPARDHA" className="w-full h-full object-contain" />
+                <img src="/assets/techspardha.webp" alt="TECHSPARDHA" className="w-full h-full object-contain" />
               </motion.div>
             </div>
 
