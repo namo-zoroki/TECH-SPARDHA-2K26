@@ -1,7 +1,7 @@
 /**
- * TechSpardha 2K26 - API service (talks to the Google Apps Script backend).
+ * TechSpardha 2K26 - API service (talks to the Google Apps Script backend, v1.4).
  *
- * Public:  getEvents(), register()
+ * Public:  getEvents(), checkTeamName(), register()
  * Admin:   apiService.admin.* (needs a session token from admin.login())
  *
  * Notes
@@ -11,14 +11,14 @@
  *   missing response is ALWAYS reported as a failure, never as success.
  */
 
-const GAS_API_URL: string =
-  (import.meta.env.VITE_GAS_API_URL as string | undefined) || '';
+const GAS_API_URL: string = (import.meta.env.VITE_GAS_API_URL as string | undefined) || '';
 
 /** Show the "taking longer than usual" hint after this long (spec 6.10). */
 export const SLOW_NOTICE_MS = 45_000;
 
 const REGISTER_TIMEOUT_MS = 120_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
+const TEAM_NAME_CHECK_TIMEOUT_MS = 15_000;
 
 const TOKEN_KEY = 'ts26_admin_token';
 
@@ -56,7 +56,7 @@ export interface Person {
 }
 
 export interface RegisterPayload {
-  /** Generate once per submit attempt; reuse it on retry. */
+  /** Generate once per submit attempt; reuse it on retry. 8-100 chars of A-Z a-z 0-9 _ - */
   idempotencyKey: string;
 
   eventId: string;
@@ -66,7 +66,10 @@ export interface RegisterPayload {
   /** The OTHER members only. The captain is never repeated here. */
   members?: Person[];
 
-  /** Required when the team has 2+ members; optional for a single member. */
+  /**
+   * Required when the team has 2+ members; optional for a single member.
+   * Must start with A-Z, 2-40 chars, unique across the whole fest.
+   */
   teamName?: string;
 
   /** Gamer Fiesta only: exactly one of the event's games. */
@@ -85,6 +88,20 @@ export interface RegisterPayload {
 
   /** Honeypot. Must stay empty. */
   website?: string;
+}
+
+/** Answer of the live team-name check. It is only a hint: register() checks again. */
+export interface TeamNameCheck {
+  available: boolean;
+
+  /** false when the name was empty and nothing was checked. */
+  checked?: boolean;
+
+  /** Set when available is false. */
+  reason?: 'FORMAT' | 'TEAM_NAME_TAKEN';
+
+  /** Safe to show to the user. Empty when available. */
+  message: string;
 }
 
 export interface FieldError {
@@ -122,15 +139,11 @@ export interface RegisterSuccess {
   paymentStatus: 'not_required' | 'pending_verification';
 }
 
-export type RegStatus =
-  | 'pending_verification'
-  | 'confirmed'
-  | 'cancelled';
+export type RegStatus = 'pending_verification' | 'confirmed' | 'cancelled';
 
-export type PayStatus =
-  | 'pending'
-  | 'verified'
-  | 'rejected';
+export type PayStatus = 'pending' | 'verified' | 'rejected';
+
+export type ExportKind = 'registrations_csv' | 'contacts_csv' | 'copy_all_emails' | 'copy_captain_emails';
 
 export interface AdminMember {
   collegeId: string;
@@ -176,13 +189,7 @@ export interface AdminStats {
   cancelledRegistrations: number;
   uniqueParticipants: number;
 
-  perEvent: Record<
-    string,
-    {
-      name: string;
-      total: number;
-    }
-  >;
+  perEvent: Record<string, { name: string; total: number }>;
 
   payments: {
     pending: number;
@@ -200,6 +207,7 @@ export interface AdminData {
 export interface AdminLoginResult {
   token: string;
   name: string;
+  adminId: string;
   expiresInSeconds: number;
 }
 
@@ -218,125 +226,62 @@ interface RequestOptions {
   onSlow?: () => void;
 }
 
-function failure(
-  error: string,
-  message: string
-): Failure {
-  return {
-    success: false,
-    error,
-    message,
-  };
+function failure(error: string, message: string): Failure {
+  return { success: false, error, message };
 }
 
-async function post<T>(
-  body: Record<string, unknown>,
-  opts: RequestOptions = {}
-): Promise<ApiResult<T>> {
+async function post<T>(body: Record<string, unknown>, opts: RequestOptions = {}): Promise<ApiResult<T>> {
   if (!GAS_API_URL) {
-    return failure(
-      'CONFIG_ERROR',
-      'The registration service is not configured. Please contact the organizers.'
-    );
+    return failure('CONFIG_ERROR', 'The registration service is not configured. Please contact the organizers.');
   }
 
   const controller = new AbortController();
-
-  const timeoutMs =
-    opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
-  const killTimer = setTimeout(
-    () => controller.abort(),
-    timeoutMs
-  );
-
-  const slowTimer = opts.onSlow
-    ? setTimeout(
-        opts.onSlow,
-        SLOW_NOTICE_MS
-      )
-    : undefined;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const killTimer = setTimeout(() => controller.abort(), timeoutMs);
+  const slowTimer = opts.onSlow ? setTimeout(opts.onSlow, SLOW_NOTICE_MS) : undefined;
 
   try {
-    const response = await fetch(
-      GAS_API_URL,
-      {
-        method: 'POST',
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      }
-    );
-
-    return await readResponse<T>(
-      response
-    );
+    const response = await fetch(GAS_API_URL, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    return await readResponse<T>(response);
   } catch (err) {
-    if (
-      (err as Error)?.name ===
-      'AbortError'
-    ) {
+    if ((err as Error)?.name === 'AbortError') {
       return failure(
         'TIMEOUT',
-        'The server is taking too long to respond. Do not re-enter your details. Press Retry.'
+        'The server is taking too long to respond. Do not re-enter your details. Press Retry.',
       );
     }
-
-    console.error(
-      'API request failed:',
-      err
-    );
-
-    return failure(
-      'NETWORK_ERROR',
-      'Could not reach the server. Check your internet connection and press Retry.'
-    );
+    console.error('API request failed:', err);
+    return failure('NETWORK_ERROR', 'Could not reach the server. Check your internet connection and press Retry.');
   } finally {
     clearTimeout(killTimer);
-
-    if (slowTimer) {
-      clearTimeout(slowTimer);
-    }
+    if (slowTimer) clearTimeout(slowTimer);
   }
 }
 
-async function readResponse<T>(
-  response: Response
-): Promise<ApiResult<T>> {
+async function readResponse<T>(response: Response): Promise<ApiResult<T>> {
   if (!response.ok) {
-    console.error(
-      'Server returned HTTP',
-      response.status
-    );
-
-    return failure(
-      'SERVER_ERROR',
-      'The server could not process the request. Please try again.'
-    );
+    console.error('Server returned HTTP', response.status);
+    return failure('SERVER_ERROR', 'The server could not process the request. Please try again.');
   }
 
   let parsed: unknown;
-
   try {
     parsed = await response.json();
   } catch {
     return failure(
       'BAD_RESPONSE',
-      'Received an unreadable response from the server. Nothing is confirmed. Please retry.'
+      'Received an unreadable response from the server. Nothing is confirmed. Please retry.',
     );
   }
 
-  if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    typeof (
-      parsed as {
-        success?: unknown;
-      }
-    ).success !== 'boolean'
-  ) {
+  if (!parsed || typeof parsed !== 'object' || typeof (parsed as { success?: unknown }).success !== 'boolean') {
     return failure(
       'BAD_RESPONSE',
-      'Received an unreadable response from the server. Nothing is confirmed. Please retry.'
+      'Received an unreadable response from the server. Nothing is confirmed. Please retry.',
     );
   }
 
@@ -350,38 +295,20 @@ async function readResponse<T>(
 let memoryToken: string | null = null;
 
 function getToken(): string | null {
-  if (memoryToken) {
-    return memoryToken;
-  }
-
+  if (memoryToken) return memoryToken;
   try {
-    memoryToken =
-      sessionStorage.getItem(
-        TOKEN_KEY
-      );
+    memoryToken = sessionStorage.getItem(TOKEN_KEY);
   } catch {
     /* storage unavailable: memory only */
   }
-
   return memoryToken;
 }
 
-function setToken(
-  token: string | null
-): void {
+function setToken(token: string | null): void {
   memoryToken = token;
-
   try {
-    if (token) {
-      sessionStorage.setItem(
-        TOKEN_KEY,
-        token
-      );
-    } else {
-      sessionStorage.removeItem(
-        TOKEN_KEY
-      );
-    }
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
   } catch {
     /* ignore */
   }
@@ -389,40 +316,15 @@ function setToken(
 
 async function adminCall<T>(
   action: string,
-  params: Record<
-    string,
-    unknown
-  > = {},
-  timeoutMs?: number
+  params: Record<string, unknown> = {},
+  timeoutMs?: number,
 ): Promise<ApiResult<T>> {
   const token = getToken();
+  if (!token) return failure('AUTH_REQUIRED', 'Please log in again.');
 
-  if (!token) {
-    return failure(
-      'AUTH_REQUIRED',
-      'Please log in again.'
-    );
-  }
+  const result = await post<T>({ action, token, ...params }, { timeoutMs });
 
-  const result = await post<T>(
-    {
-      action,
-      token,
-      ...params,
-    },
-    {
-      timeoutMs,
-    }
-  );
-
-  if (
-    !result.success &&
-    result.error ===
-      'AUTH_REQUIRED'
-  ) {
-    setToken(null);
-  }
-
+  if (!result.success && result.error === 'AUTH_REQUIRED') setToken(null);
   return result;
 }
 
@@ -432,16 +334,20 @@ async function adminCall<T>(
 
 export const apiService = {
   /** Loads operational event data. */
-  async getEvents(): Promise<
-    ApiResult<{
-      events: EventInfo[];
-    }>
-  > {
-    return post<{
-      events: EventInfo[];
-    }>({
-      action: 'get_events',
-    });
+  async getEvents(): Promise<ApiResult<{ events: EventInfo[] }>> {
+    return post<{ events: EventInfo[] }>({ action: 'get_events' });
+  },
+
+  /**
+   * Live "is this team name free?" check (read-only, a hint for the form).
+   * Pass the captain's College ID when it is valid: the same captain may reuse their own team name.
+   * May fail with THROTTLED (site-wide limit); treat any failure as "unknown" and carry on.
+   */
+  async checkTeamName(teamName: string, captainId?: string): Promise<ApiResult<TeamNameCheck>> {
+    return post<TeamNameCheck>(
+      { action: 'check_team_name', teamName, captainId: captainId ?? '' },
+      { timeoutMs: TEAM_NAME_CHECK_TIMEOUT_MS },
+    );
   },
 
   /**
@@ -450,26 +356,17 @@ export const apiService = {
    * Reuse the same idempotencyKey when retrying after a timeout
    * or network failure so the server never creates a duplicate.
    */
-  async register(
-    payload: RegisterPayload,
-    opts: {
-      onSlow?: () => void;
-    } = {}
-  ): Promise<
-    ApiResult<RegisterSuccess>
-  > {
+  async register(payload: RegisterPayload, opts: { onSlow?: () => void } = {}): Promise<ApiResult<RegisterSuccess>> {
     return post<RegisterSuccess>(
       {
         action: 'register',
         ...payload,
-        website:
-          payload.website ?? '',
+        website: payload.website ?? '',
       },
       {
-        timeoutMs:
-          REGISTER_TIMEOUT_MS,
+        timeoutMs: REGISTER_TIMEOUT_MS,
         onSlow: opts.onSlow,
-      }
+      },
     );
   },
 
@@ -481,29 +378,17 @@ export const apiService = {
     /**
      * Admin login.
      *
-     * IMPORTANT:
-     * The backend expects `adminId`, NOT `name`.
+     * IMPORTANT: the backend expects `adminId`, NOT `name`.
+     * Result: { token, name, adminId, expiresInSeconds }.
      */
-    async login(
-      adminId: string,
-      password: string
-    ): Promise<
-      ApiResult<AdminLoginResult>
-    > {
-      const result =
-        await post<AdminLoginResult>(
-          {
-            action:
-              'admin_login',
-            adminId,
-            password,
-          }
-        );
+    async login(adminId: string, password: string): Promise<ApiResult<AdminLoginResult>> {
+      const result = await post<AdminLoginResult>({
+        action: 'admin_login',
+        adminId,
+        password,
+      });
 
-      if (result.success) {
-        setToken(result.token);
-      }
-
+      if (result.success) setToken(result.token);
       return result;
     },
 
@@ -511,191 +396,62 @@ export const apiService = {
       setToken(null);
     },
 
-    getData(): Promise<
-      ApiResult<AdminData>
-    > {
-      return adminCall<AdminData>(
-        'admin_get_data',
-        {},
-        90_000
-      );
+    getData(): Promise<ApiResult<AdminData>> {
+      return adminCall<AdminData>('admin_get_data', {}, 90_000);
+    },
+
+    /** Returns the screenshot as base64 plus its MIME type. */
+    getScreenshot(regId: string): Promise<ApiResult<{ mimeType: string; base64: string }>> {
+      return adminCall('admin_get_screenshot', { regId }, 90_000);
+    },
+
+    verifyPayment(regId: string, note?: string): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_verify_payment', { regId, note: note ?? '' });
+    },
+
+    /** Rejecting cancels the registration and frees every member's slot. */
+    rejectPayment(regId: string, note?: string): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_reject_payment', { regId, note: note ?? '' });
+    },
+
+    cancelRegistration(regId: string, note?: string): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_cancel', { regId, note: note ?? '' });
     },
 
     /**
-     * Returns the screenshot as base64
-     * plus its MIME type.
-     */
-    getScreenshot(
-      regId: string
-    ): Promise<
-      ApiResult<{
-        mimeType: string;
-        base64: string;
-      }>
-    > {
-      return adminCall(
-        'admin_get_screenshot',
-        {
-          regId,
-        },
-        90_000
-      );
-    },
-
-    verifyPayment(
-      regId: string,
-      note?: string
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_verify_payment',
-        {
-          regId,
-          note: note ?? '',
-        }
-      );
-    },
-
-    /**
-     * Rejecting cancels the registration
-     * and frees every member's slot.
-     */
-    rejectPayment(
-      regId: string,
-      note?: string
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_reject_payment',
-        {
-          regId,
-          note: note ?? '',
-        }
-      );
-    },
-
-    cancelRegistration(
-      regId: string,
-      note?: string
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_cancel',
-        {
-          regId,
-          note: note ?? '',
-        }
-      );
-    },
-
-    /**
-     * Replaces oldCollegeId with
-     * newMember.
+     * Replaces oldCollegeId with newMember.
      *
-     * If the member being replaced is the captain,
-     * newCaptainId may name another active member;
-     * otherwise the new member becomes captain.
+     * If the member being replaced is the captain, newCaptainId may name another
+     * active member; otherwise the new member becomes captain.
      */
     swapMember(
       regId: string,
       oldCollegeId: string,
       newMember: Person,
-      newCaptainId?: string
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_swap_member',
-        {
-          regId,
-          oldCollegeId,
-          newMember,
-          newCaptainId,
-        }
-      );
+      newCaptainId?: string,
+    ): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_swap_member', { regId, oldCollegeId, newMember, newCaptainId });
+    },
+
+    /** newCaptainId is required when removing the current captain. */
+    removeMember(regId: string, collegeId: string, newCaptainId?: string): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_remove_member', { regId, collegeId, newCaptainId });
+    },
+
+    changeCaptain(regId: string, collegeId: string): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_change_captain', { regId, collegeId });
+    },
+
+    editParticipant(collegeId: string, fields: Partial<Omit<Person, 'collegeId'>>): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_edit_participant', { collegeId, fields });
     },
 
     /**
-     * newCaptainId is required when removing
-     * the current captain.
+     * Records an admin export (CSV download, copied emails) so it shows in Admin_Log.
+     * Call it right before or after the browser builds the file / copies the text.
      */
-    removeMember(
-      regId: string,
-      collegeId: string,
-      newCaptainId?: string
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_remove_member',
-        {
-          regId,
-          collegeId,
-          newCaptainId,
-        }
-      );
-    },
-
-    changeCaptain(
-      regId: string,
-      collegeId: string
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_change_captain',
-        {
-          regId,
-          collegeId,
-        }
-      );
-    },
-
-    editParticipant(
-      collegeId: string,
-      fields: Partial<
-        Omit<Person, 'collegeId'>
-      >
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_edit_participant',
-        {
-          collegeId,
-          fields,
-        }
-      );
-    },
-
-    /**
-     * Records an admin export before
-     * data is copied/downloaded.
-     *
-     * Valid backend export kinds:
-     * - registrations_csv
-     * - contacts_csv
-     * - copy_all_emails
-     * - copy_captain_emails
-     */
-    logExport(
-      kind: string,
-      eventId: string,
-      count: number
-    ): Promise<
-      ApiResult<MessageResult>
-    > {
-      return adminCall(
-        'admin_log_export',
-        {
-          kind,
-          eventId,
-          count,
-        }
-      );
+    logExport(kind: ExportKind, eventId: string, count: number): Promise<ApiResult<MessageResult>> {
+      return adminCall('admin_log_export', { kind, eventId, count });
     },
   },
 };
@@ -704,63 +460,25 @@ export const apiService = {
 // Small helpers for the registration form
 // ---------------------------------------------------------------------------
 
-/**
- * Reads a file as a data URL
- * (data:image/png;base64,...),
- * which the backend accepts.
- */
-export function fileToDataUrl(
-  file: File
-): Promise<string> {
-  return new Promise(
-    (resolve, reject) => {
-      const reader =
-        new FileReader();
-
-      reader.onload = () => {
-        resolve(
-          String(reader.result)
-        );
-      };
-
-      reader.onerror = () => {
-        reject(
-          new Error(
-            'Could not read the file.'
-          )
-        );
-      };
-
-      reader.readAsDataURL(file);
-    }
-  );
+/** Reads a file as a data URL (data:image/png;base64,...), which the backend accepts. */
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Could not read the file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 /** New idempotency key for one submit attempt. */
 export function newIdempotencyKey(): string {
-  if (
-    typeof crypto !==
-      'undefined' &&
-    'randomUUID' in crypto
-  ) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
-
-  return (
-    'k' +
-    Date.now().toString(36) +
-    Math.random()
-      .toString(36)
-      .slice(2, 12)
-  );
+  return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
 }
 
-/**
- * Type guard that narrows an ApiResult
- * to its failure branch.
- */
-export function isFailure<T>(
-  r: ApiResult<T>
-): r is Failure {
+/** Type guard that narrows an ApiResult to its failure branch. */
+export function isFailure<T>(r: ApiResult<T>): r is Failure {
   return r.success === false;
 }

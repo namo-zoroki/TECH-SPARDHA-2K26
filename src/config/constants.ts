@@ -2,6 +2,7 @@
  * Shared constants and pure rules for TechSpardha 2K26.
  * Used by the registration form and the admin dashboard.
  * The server re-validates every rule here; this file only gives instant feedback.
+ * Keep these rules in sync with the Apps Script backend (v1.4) CONFIG block.
  */
 import type { Person } from '@/src/services/api';
 
@@ -23,17 +24,26 @@ export function buildUpiLink(amount: number): string {
   );
 }
 
-export const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024; // 2 MB (server limit is ~3 MB)
+export const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024; // 2 MB (server limit is 3 MB)
 
 // ---------------------------------------------------------------------------
 // Identity rules
 // ---------------------------------------------------------------------------
 
-/** A + 4-digit year + 2-7 letters + 4-5 digits, e.g. A2026IT11257. Change here only. */
-export const COLLEGE_ID_REGEX = /^A\d{4}[A-Z]{2,7}\d{4,5}$/;
-const COLLEGE_ID_LETTERS_REGEX = /^A\d{4}([A-Z]{2,7})\d{4,5}$/;
-
 export const BRANCH_CODES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'BT', 'ME', 'ECE', 'MBA', 'MCA'] as const;
+
+/** Branch codes allowed INSIDE a College ID. ASH is a form choice only, never part of an ID. */
+export const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'ECE', 'MBA', 'MCA'] as const;
+const ID_YEAR_PATTERN = '202[3-6]';
+
+/** A + year 2023-2026 + branch code + 4-5 digits, e.g. A2024CSE1234. Change here only. */
+export const COLLEGE_ID_REGEX = new RegExp(`^A${ID_YEAR_PATTERN}(?:${ID_BRANCH_CODES.join('|')})\\d{4,5}$`);
+const COLLEGE_ID_LETTERS_REGEX = new RegExp(`^A\\d{4}(${ID_BRANCH_CODES.join('|')})\\d{4,5}$`);
+export const COLLEGE_ID_EXAMPLE = 'A2024CSE1234';
+export const COLLEGE_ID_HELP =
+  `College ID must look like ${COLLEGE_ID_EXAMPLE}: A, a year from 2023 to 2026, a branch code (` +
+  ID_BRANCH_CODES.join(', ') +
+  ') and 4 or 5 digits.';
 
 export const YEAR_OPTIONS = [
   { value: '1st', label: '1st Year' },
@@ -44,7 +54,77 @@ export const YEAR_OPTIONS = [
 
 const PG_BRANCHES = ['MBA', 'MCA'];
 const FIRST_YEAR_BRANCHES = ['ASH', 'MBA', 'MCA'];
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Full name: English letters, spaces and . ' - only. Starts with a letter. No digits.
+export const NAME_MIN = 2;
+export const NAME_MAX = 60;
+const NAME_REGEX = /^[A-Za-z][A-Za-z .'-]*$/;
+export const NAME_HELP =
+  "Full name must use English letters only (spaces and . ' - are allowed), start with a letter, have no numbers, and be 2 to 60 characters.";
+
+export function isValidName(name: string): boolean {
+  return (
+    name.length >= NAME_MIN &&
+    name.length <= NAME_MAX &&
+    NAME_REGEX.test(name) &&
+    name.replace(/[^A-Za-z]/g, '').length >= 2
+  );
+}
+
+// Email: only these domains; the part before @ must start with a letter.
+export const ALLOWED_EMAIL_DOMAINS = ['gmail.com', 'imsec.ac.in'] as const;
+const EMAIL_LOCAL_REGEX = /^[a-z](?:[a-z0-9._-]*[a-z0-9])?$/;
+const EMAIL_LOCAL_MIN = 3;
+const EMAIL_LOCAL_MAX = 64;
+export const EMAIL_HINT = `Only @${ALLOWED_EMAIL_DOMAINS.join(' or @')} addresses are accepted.`;
+export const EMAIL_HELP = `Email must be a @${ALLOWED_EMAIL_DOMAINS.join(' or @')} address, and the part before @ must start with a letter.`;
+
+/** Pass the email already trimmed and lowercased. */
+export function isValidEmail(email: string): boolean {
+  if (email.length > 254) return false;
+  const at = email.indexOf('@');
+  if (at < 1 || at !== email.lastIndexOf('@')) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!(ALLOWED_EMAIL_DOMAINS as readonly string[]).includes(domain)) return false;
+  if (local.length < EMAIL_LOCAL_MIN || local.length > EMAIL_LOCAL_MAX) return false;
+  if (local.includes('..')) return false;
+  return EMAIL_LOCAL_REGEX.test(local);
+}
+
+// ---------------------------------------------------------------------------
+// Team name rules
+// ---------------------------------------------------------------------------
+
+export const TEAM_NAME_MIN = 2;
+export const TEAM_NAME_MAX = 40;
+// First character an English letter; then letters, digits, spaces and - _ . & ' !
+const TEAM_NAME_REGEX = /^[A-Za-z][A-Za-z0-9 _.&'!-]*$/;
+/** Wait this long after the last keystroke before asking the server if the name is free. */
+export const TEAM_NAME_CHECK_DEBOUNCE_MS = 600;
+export const TEAM_NAME_HINT =
+  "Must be unique across the whole fest. Start with a letter; then letters, numbers, spaces and - _ . & ' ! are allowed. Names that differ only in case, spaces or punctuation count as the same.";
+
+/** Lowercase letters and digits only: "Team-A", "team a" and "TeamA" all become "teama". */
+export function teamNameKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Returns an error message, or '' when the name's format is fine. Expects a trimmed, single-spaced name. */
+export function teamNameFormatError(name: string): string {
+  if (name.length < TEAM_NAME_MIN || name.length > TEAM_NAME_MAX) {
+    return `Team name must be ${TEAM_NAME_MIN} to ${TEAM_NAME_MAX} characters.`;
+  }
+  if (!TEAM_NAME_REGEX.test(name)) {
+    return "Team name must start with an English letter (A-Z). After that you can use letters, numbers, spaces and - _ . & ' !";
+  }
+  if (teamNameKey(name).length < 2) return 'Team name needs at least 2 letters or numbers.';
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// Slots
+// ---------------------------------------------------------------------------
 
 export const SLOT_GROUPS = [
   { slot: '1', title: 'Slot 1', note: 'Pick one event from this slot' },
@@ -127,13 +207,14 @@ export function validatePerson(p: Person): PersonErrors {
 
   const id = normalizeCollegeId(p.collegeId);
   if (!id) e.collegeId = 'College ID is required.';
-  else if (!COLLEGE_ID_REGEX.test(id)) e.collegeId = 'Enter a valid College ID, for example A2026IT11257.';
+  else if (!COLLEGE_ID_REGEX.test(id)) e.collegeId = COLLEGE_ID_HELP;
 
   const name = p.fullName.trim().replace(/\s+/g, ' ');
-  if (name.length < 2 || name.length > 80) e.fullName = 'Full name must be 2 to 80 characters.';
+  if (!isValidName(name)) e.fullName = NAME_HELP;
 
-  const email = p.email.trim();
-  if (!email || email.length > 254 || !EMAIL_REGEX.test(email)) e.email = 'Enter a valid email address.';
+  const email = p.email.trim().toLowerCase();
+  if (!email) e.email = 'Email is required.';
+  else if (!isValidEmail(email)) e.email = EMAIL_HELP;
 
   if (!normalizePhone(p.phone)) e.phone = 'Enter a 10-digit mobile number starting with 6, 7, 8 or 9.';
 

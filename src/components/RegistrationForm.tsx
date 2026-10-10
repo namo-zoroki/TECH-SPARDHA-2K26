@@ -27,13 +27,21 @@ import {
 } from "@/src/services/api";
 import {
   BRANCH_CODES,
+  COLLEGE_ID_EXAMPLE,
+  COLLEGE_ID_REGEX,
+  EMAIL_HINT,
   MAX_SCREENSHOT_BYTES,
+  NAME_MAX,
   SLOT_GROUPS,
+  TEAM_NAME_CHECK_DEBOUNCE_MS,
+  TEAM_NAME_HINT,
+  TEAM_NAME_MAX,
   UPI_ID,
   YEAR_OPTIONS,
   buildUpiLink,
   emptyPerson,
   normalizeCollegeId,
+  teamNameFormatError,
   toApiPerson,
   updatePerson,
   validatePerson,
@@ -69,8 +77,16 @@ interface SubmitError {
   retry: boolean;
 }
 
+/** Result of the live team-name check, tied to the exact name + captain it was asked for. */
+interface NameCheckState {
+  key: string;
+  status: "checking" | "ok" | "taken";
+  message: string;
+}
+
 const DRAFT_KEY = "ts26_registration_draft_v1";
 const RETRYABLE = ["NETWORK_ERROR", "TIMEOUT", "BAD_RESPONSE", "SERVER_ERROR", "BUSY"];
+const NAME_TAKEN_FALLBACK = "This team name is already taken. Please choose another.";
 
 const STEP_TITLES: Record<StepId, string> = {
   1: "Select Your Event",
@@ -189,7 +205,7 @@ const PersonFields: React.FC<PersonFieldsProps> = ({ prefix, person, errors, vis
         value={person.fullName}
         onChange={(e) => onChange("fullName", e.target.value)}
         placeholder="Enter full name"
-        maxLength={80}
+        maxLength={NAME_MAX}
         autoComplete="off"
         error={err("fullName")}
       />
@@ -198,23 +214,26 @@ const PersonFields: React.FC<PersonFieldsProps> = ({ prefix, person, errors, vis
         name="collegeId"
         value={person.collegeId}
         onChange={(e) => onChange("collegeId", e.target.value)}
-        placeholder="e.g. A2026IT11257"
+        placeholder={`e.g. ${COLLEGE_ID_EXAMPLE}`}
         maxLength={20}
         autoCapitalize="characters"
         autoComplete="off"
         error={err("collegeId")}
       />
-      <Input
-        label="Email Address"
-        name="email"
-        type="email"
-        value={person.email}
-        onChange={(e) => onChange("email", e.target.value)}
-        placeholder="name@example.com"
-        maxLength={254}
-        autoComplete="off"
-        error={err("email")}
-      />
+      <div className="space-y-1.5">
+        <Input
+          label="Email Address"
+          name="email"
+          type="email"
+          value={person.email}
+          onChange={(e) => onChange("email", e.target.value)}
+          placeholder="name@gmail.com"
+          maxLength={254}
+          autoComplete="off"
+          error={err("email")}
+        />
+        <p className="text-[10px] text-white/40 tracking-wide">{EMAIL_HINT}</p>
+      </div>
       <Input
         label="Mobile Number"
         name="phone"
@@ -281,6 +300,7 @@ export const RegistrationForm: React.FC = () => {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [attempted, setAttempted] = useState<Record<number, boolean>>({});
   const [pendingGame, setPendingGame] = useState<{ game: string; need: number; remove: number[] } | null>(null);
+  const [nameCheck, setNameCheck] = useState<NameCheckState | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [slow, setSlow] = useState(false);
@@ -378,6 +398,7 @@ export const RegistrationForm: React.FC = () => {
         setSubmitError(null);
         setTouched({});
         setAttempted({});
+        setNameCheck(null);
         keyRef.current = newIdempotencyKey();
       }
       setSuccess(null);
@@ -509,10 +530,40 @@ export const RegistrationForm: React.FC = () => {
   }, [captain.collegeId, members]);
 
   const teamNameClean = teamName.trim().replace(/\s+/g, " ");
-  const teamNameError =
-    isTeam && (memberCount >= 2 || teamNameClean) && (teamNameClean.length < 2 || teamNameClean.length > 40)
-      ? "Team name must be 2 to 40 characters."
-      : undefined;
+  const teamNameFormatErr =
+    isTeam && (memberCount >= 2 || teamNameClean) ? teamNameFormatError(teamNameClean) || undefined : undefined;
+
+  // ----- live team-name availability (a hint only: the server checks again on submit) -----
+  const captainIdForCheck = COLLEGE_ID_REGEX.test(normalizeCollegeId(captain.collegeId))
+    ? normalizeCollegeId(captain.collegeId)
+    : "";
+  const nameCheckKey = `${teamNameClean}|${captainIdForCheck}`;
+  const nameCheckable = isTeam && step === 3 && !!teamNameClean && !teamNameFormatError(teamNameClean);
+
+  useEffect(() => {
+    if (!nameCheckable) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setNameCheck({ key: nameCheckKey, status: "checking", message: "" });
+      const res = await apiService.checkTeamName(teamNameClean, captainIdForCheck || undefined);
+      if (cancelled) return;
+      if (isFailure(res)) {
+        setNameCheck(null); // unknown (throttled, offline...): the server decides on submit
+        return;
+      }
+      setNameCheck({ key: nameCheckKey, status: res.available ? "ok" : "taken", message: res.message });
+    }, TEAM_NAME_CHECK_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [nameCheckable, nameCheckKey, teamNameClean, captainIdForCheck]);
+
+  // Only trust a result that belongs to the current name + captain.
+  const liveCheck = nameCheck && nameCheck.key === nameCheckKey ? nameCheck : null;
+  const nameTaken = liveCheck?.status === "taken" ? liveCheck.message || NAME_TAKEN_FALLBACK : undefined;
+  const teamNameError = teamNameFormatErr ?? nameTaken;
+
   const gameError = hasGames && !game ? "Choose exactly one game." : undefined;
   const sizeError =
     isTeam && (!hasGames || game) && (memberCount < bounds.min || memberCount > bounds.max)
@@ -612,6 +663,10 @@ export const RegistrationForm: React.FC = () => {
     const list = res.errors?.map((e) => e.message) ?? [];
     setSubmitError({ message: res.message, list, retry: RETRYABLE.includes(res.error) });
     if (res.error === "EVENT_NOT_FOUND" || res.errors?.some((e) => e.code === "EVENT_CLOSED")) void loadEvents();
+
+    // The server says the name is taken: remember it so Back/Next stays blocked until the name changes.
+    const takenErr = res.errors?.find((e) => e.code === "TEAM_NAME_TAKEN");
+    if (takenErr) setNameCheck({ key: nameCheckKey, status: "taken", message: takenErr.message });
   };
 
   const startAnother = () => {
@@ -629,6 +684,7 @@ export const RegistrationForm: React.FC = () => {
     setSubmitError(null);
     setTouched({});
     setAttempted({});
+    setNameCheck(null);
     keyRef.current = newIdempotencyKey();
     scrollToCard();
   };
@@ -750,6 +806,9 @@ export const RegistrationForm: React.FC = () => {
     const canRemove = bounds.min !== bounds.max && memberCount > bounds.min;
     const visible = visibleFor(3);
 
+    // A format error waits for touch/Next; a "taken" answer from the server shows straight away.
+    const teamNameShownError = teamNameFormatErr ? (visible("teamName") ? teamNameFormatErr : undefined) : nameTaken;
+
     return (
       <div className="space-y-6">
         {stepHeading(3)}
@@ -823,13 +882,17 @@ export const RegistrationForm: React.FC = () => {
             onChange={(e) => setTeamName(e.target.value)}
             onBlur={() => touch("teamName")}
             placeholder="Enter team name"
-            maxLength={40}
+            maxLength={TEAM_NAME_MAX}
             autoComplete="off"
-            error={visible("teamName") ? teamNameError : undefined}
+            error={teamNameShownError}
           />
-          <p className="text-[10px] text-white/40 tracking-wide">
-            Team names must be unique within this event.
-          </p>
+          {liveCheck?.status === "checking" && !teamNameShownError && (
+            <p className="text-[10px] text-white/40 tracking-wide">Checking availability…</p>
+          )}
+          {liveCheck?.status === "ok" && !teamNameShownError && (
+            <p className="text-[10px] text-green-400 tracking-wide">Team name is available.</p>
+          )}
+          <p className="text-[10px] text-white/40 tracking-wide leading-relaxed">{TEAM_NAME_HINT}</p>
         </div>
 
         {showMembers && (
@@ -1378,6 +1441,9 @@ export const RegistrationForm: React.FC = () => {
             </h2>
             <p className="text-white/60 max-w-xl mx-auto uppercase tracking-widest text-sm">
               Secure your spot in TechSpardha 2K26. Follow the steps below.
+            </p>
+            <p className="mt-4 text-sm font-semibold text-red-400 uppercase tracking-widest flex items-center justify-center gap-2">
+              <span>⚠</span> Last date to register: 17 October
             </p>
           </div>
 

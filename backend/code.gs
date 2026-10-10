@@ -1,5 +1,5 @@
 /**
- * TECHSPARDHA 2K26 - Backend (Google Apps Script) - v1.1
+ * TECHSPARDHA 2K26 - Backend (Google Apps Script) - v1.2
  *
  * Implements TechSpardha_Registration_Spec.md plus the final decisions:
  *  - Gamer Fiesta is ONE event with per-game team sizes (Events.GameSizes).
@@ -13,6 +13,28 @@
  *  - Lockout is per Admin ID. Disabling an admin (Active = FALSE) works on their next request.
  *  - Admin_Log has the same columns as before. Actor is written as "Name (adminid)".
  *  - Exports, copy-emails and screenshot views are now logged.
+ *
+ * v1.2 CHANGE: stricter team names.
+ *  - Team name MUST start with an English letter (A-Z). After that: letters, digits, spaces
+ *    and - _ . & ' !  are allowed.
+ *  - Team name is unique across the WHOLE FEST (all events), not just one event.
+ *  - Lookalikes count as the same name: case, spaces and punctuation are ignored
+ *    ("Team-A", "team a" and "TeamA" are one name).
+ *  - Names of CANCELLED registrations stay blocked and are not freed for reuse.
+ *  - Exception (TEAM_NAME_ALLOW_SAME_CAPTAIN): the SAME captain can reuse their own team
+ *    name, so one team can enter several events (e.g. one per slot) under one name.
+ *  - New public action "check_team_name" so the form can show "available / taken" live.
+ *    The final check still runs again inside register, so the live check is only a hint.
+ *
+ * v1.3 CHANGE: stricter College ID.
+ *  - Format: A + year 2023 to 2026 + branch code (CSEAIML, CSE, CS, IT, BT, ME, ECE, MBA, MCA)
+ *    + 4 or 5 digits. Example: A2024CSE1234.
+ *  - Edit ID_YEAR_PATTERN / ID_BRANCH_CODES in CONFIG to change it.
+ *
+ * v1.4 CHANGE: stricter name and email.
+ *  - Full name: English letters, spaces and . ' - only. Starts with a letter, no digits, 2 to 60 characters.
+ *  - Email: only @gmail.com or @imsec.ac.in, and the part before @ must start with a letter.
+ *  - Edit ALLOWED_EMAIL_DOMAINS / NAME_* in CONFIG to change these.
  *
  * SETUP (once):
  *  1. appsscript.json: set "timeZone": "Asia/Kolkata".
@@ -29,7 +51,7 @@
  *  6. Deploy -> Manage deployments -> edit the existing deployment -> New version.
  *     Execute as: Me. Who has access: Anyone.
  *
- * Public actions: get_events, register (+ a health check on GET).
+ * Public actions: get_events, check_team_name, register (+ a health check on GET).
  * Everything else needs an admin session token.
  */
 
@@ -51,6 +73,16 @@ const MAX_TEAM_MEMBERS = 20;
 const BACKUPS_TO_KEEP = 7;
 const MIN_SHEET_ROWS = 3000;
 
+// Team name rules (v1.2).
+const TEAM_NAME_MIN = 2;
+const TEAM_NAME_MAX = 40;
+// First character an English letter; then letters, digits, spaces and - _ . & ' !
+const TEAM_NAME_REGEX = /^[A-Za-z][A-Za-z0-9 _.&'!-]*$/;
+// true: the same captain may reuse their own team name (e.g. same team in two slots).
+const TEAM_NAME_ALLOW_SAME_CAPTAIN = true;
+// Live name checks allowed per minute across the whole site (keeps the endpoint from being hammered).
+const NAME_CHECK_MAX_PER_MIN = 120;
+
 // Admin accounts (live in a separate owner-only spreadsheet, tab below).
 const ADMINS_TAB = 'Admins';
 const ADMIN_HEADERS = ['AdminID', 'Name', 'Password', 'Active'];
@@ -58,15 +90,30 @@ const ADMIN_ID_REGEX = /^[a-z0-9_.-]{2,40}$/;
 const MIN_ADMIN_PASSWORD_LEN = 12;
 const EXPORT_KINDS = ['registrations_csv', 'contacts_csv', 'copy_all_emails', 'copy_captain_emails'];
 
-// College ID: A + 4-digit year + 2-7 letters + 4-5 digits. Change here only.
-const COLLEGE_ID_REGEX = /^A\d{4}[A-Z]{2,7}\d{4,5}$/;
-const COLLEGE_ID_LETTERS_REGEX = /^A\d{4}([A-Z]{2,7})\d{4,5}$/;
+// College ID: A + year 2023-2026 + a valid branch code + 4-5 digits. Change here only.
+// Example: A2024CSE1234. (ASH is a branch choice on the form, not a code used inside the ID.)
+const ID_YEAR_PATTERN = '202[3-6]';
+const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'ECE', 'MBA', 'MCA'];
+const COLLEGE_ID_REGEX = new RegExp('^A' + ID_YEAR_PATTERN + '(?:' + ID_BRANCH_CODES.join('|') + ')\\d{4,5}$');
+const COLLEGE_ID_LETTERS_REGEX = new RegExp('^A\\d{4}(' + ID_BRANCH_CODES.join('|') + ')\\d{4,5}$');
+const COLLEGE_ID_HELP = 'College ID must look like A2024CSE1234: A, a year from 2023 to 2026, a branch code (' +
+  ID_BRANCH_CODES.join(', ') + ') and 4 or 5 digits.';
 const BRANCHES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'BT', 'ME', 'ECE', 'MBA', 'MCA'];
 const YEARS = ['1st', '2nd', '3rd', '4th'];
 const SLOTS = ['1', '2', '3', 'TS'];
 const SLOT_COLUMN = { '1': 'Slot1', '2': 'Slot2', '3': 'Slot3', 'TS': 'TechSnap' };
 const SLOT_LABEL = { '1': 'Slot 1', '2': 'Slot 2', '3': 'Slot 3', 'TS': 'TechSnap' };
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+// Email: only these domains, and the part before @ must start with a letter.
+const ALLOWED_EMAIL_DOMAINS = ['gmail.com', 'imsec.ac.in'];
+const EMAIL_LOCAL_REGEX = /^[a-z](?:[a-z0-9._-]*[a-z0-9])?$/; // starts with a letter, ends with letter/digit
+const EMAIL_LOCAL_MIN = 3;
+const EMAIL_LOCAL_MAX = 64;
+const EMAIL_HELP = 'email must be a @' + ALLOWED_EMAIL_DOMAINS.join(' or @') + ' address, and the part before @ must start with a letter.';
+// Full name: English letters, spaces and . ' - only. Starts with a letter. No digits.
+const NAME_MIN = 2;
+const NAME_MAX = 60;
+const NAME_REGEX = /^[A-Za-z][A-Za-z .'-]*$/;
+const NAME_HELP = "full name must use English letters only (spaces and . ' - are allowed), start with a letter, have no numbers, and be 2 to 60 characters.";
 const GENERIC_ERR = 'Something went wrong on the server. Nothing was saved. Please try again.';
 
 const S = {
@@ -177,6 +224,88 @@ function colLetter_(n) {
   return s;
 }
 function colIndex_(sheetName, header) { return HEADERS[sheetName].indexOf(header) + 1; }
+
+// True when the name passes the name rules (see NAME_* in CONFIG).
+function nameOk_(name) {
+  return name.length >= NAME_MIN && name.length <= NAME_MAX && NAME_REGEX.test(name) &&
+    name.replace(/[^A-Za-z]/g, '').length >= 2;
+}
+
+// True when the (already lowercased) email passes the email rules (see ALLOWED_EMAIL_DOMAINS in CONFIG).
+function emailOk_(email) {
+  if (email.length > 254) return false;
+  const at = email.indexOf('@');
+  if (at < 1 || at !== email.lastIndexOf('@')) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (ALLOWED_EMAIL_DOMAINS.indexOf(domain) === -1) return false;
+  if (local.length < EMAIL_LOCAL_MIN || local.length > EMAIL_LOCAL_MAX) return false;
+  if (local.indexOf('..') !== -1) return false;
+  return EMAIL_LOCAL_REGEX.test(local);
+}
+
+// ============================================================
+// TEAM NAME RULES (v1.2)
+// ============================================================
+// Comparison key: lowercase letters and digits only. "Team-A", "team a" and "TeamA" all become "teama".
+function teamNameKey_(name) {
+  return String(name === null || name === undefined ? '' : name).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Returns an error message, or '' when the name's format is fine.
+function teamNameFormatError_(name) {
+  if (name.length < TEAM_NAME_MIN || name.length > TEAM_NAME_MAX) {
+    return 'Team name must be ' + TEAM_NAME_MIN + ' to ' + TEAM_NAME_MAX + ' characters.';
+  }
+  if (!TEAM_NAME_REGEX.test(name)) {
+    return "Team name must start with an English letter (A-Z). After that you can use letters, numbers, spaces and - _ . & ' !";
+  }
+  if (teamNameKey_(name).length < 2) {
+    return 'Team name needs at least 2 letters or numbers.';
+  }
+  return '';
+}
+
+// True when another team already uses this name in ANY event, whatever its status (cancelled names stay blocked).
+// The same captain is allowed to reuse their own name when TEAM_NAME_ALLOW_SAME_CAPTAIN is on.
+function teamNameTaken_(name, captainId, regRows) {
+  const key = teamNameKey_(name);
+  if (!key) return false;
+  const cap = normId_(captainId);
+  return regRows.some(function (r) {
+    const existing = String(r.TeamName === null || r.TeamName === undefined ? '' : r.TeamName);
+    if (!existing || teamNameKey_(existing) !== key) return false;
+    if (TEAM_NAME_ALLOW_SAME_CAPTAIN && cap && normId_(r.CaptainID) === cap) return false;
+    return true;
+  });
+}
+
+// Soft global limit for the live check, counted per minute.
+function nameCheckThrottled_() {
+  const cache = CacheService.getScriptCache();
+  const key = 'NCHK_' + Math.floor(Date.now() / 60000);
+  const n = (parseInt(cache.get(key) || '0', 10) || 0) + 1;
+  cache.put(key, String(n), 120);
+  return n > NAME_CHECK_MAX_PER_MIN;
+}
+
+// Public, read-only. Only a hint for the form: register() checks again inside the lock.
+// data: { teamName, captainId (optional) }
+function checkTeamName_(data) {
+  if (nameCheckThrottled_()) return fail_('THROTTLED', 'Too many checks. Please wait a moment.');
+  const name = cleanText_(data.teamName);
+  if (!name) return ok_({ available: true, checked: false, message: '' });
+
+  const fmt = teamNameFormatError_(name);
+  if (fmt) return ok_({ available: false, reason: 'FORMAT', message: fmt });
+
+  const capRaw = normId_(data.captainId);
+  const capId = COLLEGE_ID_REGEX.test(capRaw) ? capRaw : '';
+  if (teamNameTaken_(name, capId, readTable_(S.REGS).rows)) {
+    return ok_({ available: false, reason: 'TEAM_NAME_TAKEN', message: 'This team name is already taken. Please choose another.' });
+  }
+  return ok_({ available: true, checked: true, message: '' });
+}
 
 // ============================================================
 // SHEET ACCESS
@@ -312,6 +441,7 @@ function doPost(e) {
   const action = String(data.action || '');
   try {
     if (action === 'get_events') return jsonOut_(ok_({ events: getPublicEvents_() }));
+    if (action === 'check_team_name') return jsonOut_(checkTeamName_(data)); // read-only, no lock needed
 
     if (action === 'register') {
       const pre = preCheckRegister_(data);
@@ -430,13 +560,13 @@ function validatePerson_(p, label, errors) {
   out.collegeId = normId_(p.collegeId);
   const idOk = COLLEGE_ID_REGEX.test(out.collegeId);
   const who = label + (idOk ? ' (' + out.collegeId + ')' : '');
-  if (!idOk) errors.push(err_(label + '.collegeId', label + ': College ID is not valid.'));
+  if (!idOk) errors.push(err_(label + '.collegeId', label + ': ' + COLLEGE_ID_HELP));
 
   out.fullName = cleanText_(p.fullName);
-  if (out.fullName.length < 2 || out.fullName.length > 80) errors.push(err_(label + '.fullName', who + ': full name must be 2 to 80 characters.'));
+  if (!nameOk_(out.fullName)) errors.push(err_(label + '.fullName', who + ': ' + NAME_HELP));
 
   out.email = cleanText_(p.email).toLowerCase();
-  if (out.email.length > 254 || !EMAIL_REGEX.test(out.email)) errors.push(err_(label + '.email', who + ': email is not valid.'));
+  if (!emailOk_(out.email)) errors.push(err_(label + '.email', who + ': ' + EMAIL_HELP));
 
   out.phone = normPhone_(p.phone);
   if (!out.phone) errors.push(err_(label + '.phone', who + ': phone must be a 10-digit number starting with 6, 7, 8 or 9.'));
@@ -513,10 +643,13 @@ function handleRegister_(data) {
   }
 
   let teamName = '';
+  let teamNameFormatOk = false;
   if (event.teamMax > 1) {
     teamName = cleanText_(data.teamName);
     if (teamSize >= 2 || teamName) {
-      if (teamName.length < 2 || teamName.length > 40) errors.push(err_('teamName', 'Team name must be 2 to 40 characters.'));
+      const fmtErr = teamNameFormatError_(teamName);
+      if (fmtErr) errors.push(err_('teamName', fmtErr, 'TEAM_NAME_FORMAT'));
+      else teamNameFormatOk = true;
     }
   }
 
@@ -540,12 +673,9 @@ function handleRegister_(data) {
   const regStatus = {};
   regs.forEach(function (r) { regStatus[String(r.RegID)] = String(r.Status); });
 
-  if (teamName && teamName.length >= 2) {
-    const lower = teamName.toLowerCase();
-    const taken = regs.some(function (r) {
-      return String(r.EventID) === event.eventId && String(r.Status) !== 'cancelled' && String(r.TeamName).trim().toLowerCase() === lower;
-    });
-    if (taken) errors.push(err_('teamName', 'This team name is already used in ' + event.name + '. Please choose another.', 'TEAM_NAME_TAKEN'));
+  // Team name must be unique across the whole fest (all events, cancelled ones included).
+  if (teamNameFormatOk && teamNameTaken_(teamName, captain ? captain.collegeId : '', regs)) {
+    errors.push(err_('teamName', 'This team name is already taken. Please choose another.', 'TEAM_NAME_TAKEN'));
   }
 
   // 5. Slot conflicts (every member)
