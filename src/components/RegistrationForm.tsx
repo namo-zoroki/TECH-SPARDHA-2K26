@@ -1442,9 +1442,10 @@ export const RegistrationForm: React.FC = () => {
             <p className="text-white/60 max-w-xl mx-auto uppercase tracking-widest text-sm">
               Secure your spot in TechSpardha 2K26. Follow the steps below.
             </p>
-            <p className="mt-4 text-sm font-semibold text-red-400 uppercase tracking-widest flex items-center justify-center gap-2">
-              <span>⚠</span> Last date to register: 17 October
-            </p>
+            <p className="mt-4 text-center text-sm font-semibold uppercase tracking-widest text-red-400">
+  <span aria-hidden="true" className="mr-2">⚠</span>
+  Last date to register: <span className="whitespace-nowrap">17 October</span>
+</p>
           </div>
 
           {notice && (
