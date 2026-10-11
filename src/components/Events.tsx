@@ -40,12 +40,12 @@ export const Events: React.FC = () => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Spotlight section: TechSnap + CEO Quest + Gamer Fiesta + Treasure Hunt */
+/* Spotlight section: TechSnap + Case Showdown + Gamer Fiesta + Treasure Hunt */
 /* ------------------------------------------------------------------ */
 
 // Accent colours (applied with inline styles so they always render)
 const YELLOW = '#facc15'; // TechSnap
-const GREEN = '#34d399'; // CEO Quest
+const GREEN = '#34d399'; // Case Showdown
 const PURPLE = '#a78bfa'; // Gamer Fiesta
 const BROWN = '#c08a52'; // Tech Treasure Hunt
 
@@ -179,10 +179,10 @@ export const EventSpotlights: React.FC = () => {
 
         {/* Three equal cards */}
         <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
-          {/* CEO QUEST */}
+          {/* Case Showdown */}
           <Card color={GREEN}>
             <Crown className="mb-6 h-8 w-8" style={{ color: GREEN }} />
-            <h3 className="font-display text-2xl font-bold sm:text-3xl">CEO Quest</h3>
+            <h3 className="font-display text-2xl font-bold sm:text-3xl">Case Showdown</h3>
             <p className="mt-1 text-white/50">Think. Decide. Lead.</p>
             <p className="mt-5 text-white/70">
               Think you can run a company? Step into the CEO's shoes and prove your business instincts.

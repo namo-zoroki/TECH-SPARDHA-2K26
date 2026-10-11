@@ -1,13 +1,16 @@
+export interface Coordinator {
+  name: string;
+  phone: string;
+}
+
 export interface TechEvent {
   id: string;
   name: string;
   category: string;
   format: 'Solo' | 'Team' | 'Solo / Team';
   fee: number;
-  /** Event lead shown in the event modal. */
-  lead?: string;
-  /** Event coordinator shown in the event modal. */
-  coordinator?: string;
+  /** Exactly two coordinators, shown with phone numbers in the event modal. */
+  coordinators: [Coordinator, Coordinator];
   description: string;
   purpose: string;
   procedure: string;
@@ -23,8 +26,10 @@ export const events: TechEvent[] = [
     category: "Technical",
     format: "Solo",
     fee: 0,
-    lead: "Ambuj Srivastava",
-    coordinator: "Naman Jain",
+    coordinators: [
+      { name: "Deepanshu Rathor", phone: "8447928070" },
+      { name: "Ayush Tyagi", phone: "6395518660" }
+    ],
     teamSize: "Solo",
     description: "Coding challenge focused on logic, problem solving, debugging and implementation speed.",
     purpose: "To test the programming skills, logical thinking, and debugging capabilities of participants.",
@@ -48,8 +53,10 @@ export const events: TechEvent[] = [
     category: "Robotics",
     format: "Team",
     fee: 0,
-    lead: "Barish Tiwari",
-    coordinator: "Manika Aggarwal",
+    coordinators: [
+      { name: "Barish Tiwari", phone: "9313323860" },
+      { name: "Avanish Choudhary", phone: "9170391838" }
+    ],
     teamSize: "2–4 members",
     description: "Robotics challenge involving design, control, navigation, stability and speed.",
     purpose: "To showcase engineering precision, mechanical design, and control efficiency in robotics.",
@@ -73,8 +80,10 @@ export const events: TechEvent[] = [
     category: "Artificial Intelligence",
     format: "Solo",
     fee: 0,
-    lead: "Deepanshu Rathor",
-    coordinator: "Aniket Parwary",
+    coordinators: [
+      { name: "Aditya", phone: "9354360089" },
+      { name: "Shiva Nagar", phone: "7237020109" }
+    ],
     teamSize: "Solo",
     description: "Build a working AI prototype around a defined problem/theme.",
     purpose: "To encourage the practical application of AI and Machine Learning to solve real-world problems.",
@@ -98,8 +107,10 @@ export const events: TechEvent[] = [
     category: "Cybersecurity",
     format: "Solo",
     fee: 0,
-    lead: "Anukar Mishra",
-    coordinator: "Anushka Mishra",
+    coordinators: [
+      { name: "Aniket Parwary", phone: "8091625443" },
+      { name: "Anukar Mishra", phone: "9430292196" }
+    ],
     teamSize: "Solo",
     description: "Cybersecurity challenge involving investigation, logical reasoning, digital clues and practical security concepts.",
     purpose: "To simulate real-world cybersecurity scenarios and test investigative skills.",
@@ -123,8 +134,10 @@ export const events: TechEvent[] = [
     category: "Innovation",
     format: "Team",
     fee: 0,
-    lead: "Ansh Bhardwaj",
-    coordinator: "Bhavishay Pratap Singh",
+    coordinators: [
+      { name: "Ansh Bhardwaj", phone: "9653040393" },
+      { name: "Bhavishay Pratap Singh", phone: "8273615014" }
+    ],
     teamSize: "2–4 members",
     description: "Teams identify/receive a real-world problem and develop a feasible solution/prototype concept.",
     purpose: "To foster entrepreneurial thinking and innovative problem-solving.",
@@ -148,8 +161,10 @@ export const events: TechEvent[] = [
     category: "Design",
     format: "Solo",
     fee: 0,
-    lead: "Shiva Nagar",
-    coordinator: "Manmeet Singh Chahal",
+    coordinators: [
+      { name: "Heemanshika Bansal", phone: "9208095394" },
+      { name: "Vaishnavi Tyagi", phone: "8851295249" }
+    ],
     teamSize: "Solo",
     description: "Rapid design challenge focused on UX, interface quality, usability, visual hierarchy and communication.",
     purpose: "To challenge designers to create intuitive and aesthetically pleasing user interfaces.",
@@ -173,8 +188,10 @@ export const events: TechEvent[] = [
     category: "Mass Participation",
     format: "Team",
     fee: 0,
-    lead: "Heemanshika Bansal",
-    coordinator: "Priyash Singh, Hemant Kansal",
+    coordinators: [
+      { name: "Kritika Chaudhary", phone: "7505378966" },
+      { name: "Ayush Sharma", phone: "8445761281" }
+    ],
     teamSize: "3–5 members",
     description: "Campus-wide technical treasure hunt involving clues, technology knowledge, observation, navigation and teamwork.",
     purpose: "To engage participants in a fun, technology-themed scavenger hunt.",
@@ -198,8 +215,10 @@ export const events: TechEvent[] = [
     category: "E-Sports",
     format: "Team",
     fee: 200,
-    lead: "Sagar Soni",
-    coordinator: "Ayush Tyagi, Divyanshu",
+    coordinators: [
+      { name: "Ambuj Kumar Srivastava", phone: "9695746991" },
+      { name: "Sagar Soni", phone: "7254901730" }
+    ],
     teamSize: "Valorant 5 · BGMI 4 · Free Fire 4",
     description: "Competitive gaming tournament focused on fair play, teamwork, match discipline and transparent tournament progression.",
     purpose: "To provide a platform for competitive e-sports enthusiasts to showcase their skills.",
@@ -223,8 +242,10 @@ export const events: TechEvent[] = [
     category: "Technology Quiz",
     format: "Solo",
     fee: 0,
-    lead: "Anya Chaudhary",
-    coordinator: "Vaishnavi Tyagi",
+    coordinators: [
+      { name: "Priyash Singh", phone: "8957202479" },
+      { name: "Divyanshu", phone: "6396290497" }
+    ],
     teamSize: "Solo",
     description: "Technology quiz covering computing awareness, logic, emerging technologies, cybersecurity, programming and technical knowledge.",
     purpose: "To test the breadth and depth of technical knowledge among students.",
@@ -244,12 +265,14 @@ export const events: TechEvent[] = [
   },
   {
     id: "09",
-    name: "CEO Quest",
+    name: "Case Showdown",
     category: "Management",
     format: "Team",
     fee: 0,
-    lead: "Ayush Sharma",
-    coordinator: "Aditya",
+    coordinators: [
+      { name: "Daksh Srivastava", phone: "9389159755" },
+      { name: "Diya Parmar", phone: "9873871037" }
+    ],
     teamSize: "2 members (duo)",
     description: "Management challenge covering business judgment, leadership, communication, strategy and decision making.",
     purpose: "To identify future leaders through business simulations and decision-making scenarios.",
@@ -273,8 +296,10 @@ export const events: TechEvent[] = [
     category: "Reel Coverage & Media",
     format: "Team",
     fee: 0,
-    lead: "Aakriti Singh",
-    coordinator: "Diya Parmar",
+    coordinators: [
+      { name: "Aakriti Singh", phone: "8800196556" },
+      { name: "Anya Chaudhary", phone: "7678637163" }
+    ],
     teamSize: "2 members (duo)",
     description: "Teams create short-form reels covering the TECHSPARDHA experience, competitions, participants, technology, atmosphere and highlights.",
     purpose: "To document the fest's energy and highlights through creative short-form video content.",

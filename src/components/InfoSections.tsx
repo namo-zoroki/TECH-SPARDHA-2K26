@@ -147,7 +147,7 @@ export const Rules: React.FC = () => {
     },
     {
       title: "Slot 3 runs together",
-      text: "All four Slot 3 events (Cyber Hunt, Tech Wars, CEO Quest and Tech Treasure Hunt) run at the same time, so you can join only one of them."
+      text: "All four Slot 3 events (Cyber Hunt, Tech Wars, Case Showdown and Tech Treasure Hunt) run at the same time, so you can join only one of them."
     },
     {
       title: "1st year students choose ASH",

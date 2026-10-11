@@ -156,7 +156,7 @@ const EVENT_SEED = [
   ['08', 'Gamer Fiesta 2.0', '2', 4, 5, 'Valorant, BGMI, Free Fire', 'Valorant:5, BGMI:4, Free Fire:4', 200, false],
   ['06', 'Cyber Hunt', '3', 2, 4, '', '', 0, true],
   ['07', 'Tech Wars', '3', 1, 2, '', '', 0, true],
-  ['09', 'CEO Quest', '3', 1, 1, '', '', 0, true],
+  ['09', 'Case Showdown', '3', 1, 1, '', '', 0, true],
   ['10', 'Tech Treasure Hunt', '3', 3, 5, '', '', 0, true],
   ['11', 'TechSnap', 'TS', 2, 2, '', '', 0, true]
 ];

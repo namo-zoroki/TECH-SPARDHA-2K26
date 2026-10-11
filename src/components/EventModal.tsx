@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechEvent } from '@/src/data/events';
-import { X, CheckCircle2, Info, Gavel } from 'lucide-react';
+import { X, CheckCircle2, Info, Gavel, Phone } from 'lucide-react';
 import { Button } from './ui/Button';
 
 interface EventModalProps {
@@ -64,21 +64,22 @@ export const EventModal: React.FC<EventModalProps> = ({ event, onClose }) => {
                   </div>
                 ))}
 
-                {/* Event Lead & Coordinator in the same line */}
-                {(event.lead || event.coordinator) && (
+                {/* Two Coordinators with phone numbers */}
+                {event.coordinators && event.coordinators.length > 0 && (
                   <div className="col-span-2 md:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {event.lead && (
-                      <div className="bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
-                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Event Lead</p>
-                        <p className="text-sm font-bold text-white">{event.lead}</p>
+                    {event.coordinators.map((c, i) => (
+                      <div key={i} className="bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
+                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Coordinator {i + 1}</p>
+                        <p className="text-sm font-bold text-white">{c.name}</p>
+                        <a
+                          href={`tel:+91${c.phone}`}
+                          className="mt-2 inline-flex items-center gap-2 text-sm text-cyan-400 hover:text-cyan-300 font-mono transition-colors"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          {c.phone}
+                        </a>
                       </div>
-                    )}
-                    {event.coordinator && (
-                      <div className="bg-white/5 p-4 border border-white/5 border-l-2 border-l-cyan-500">
-                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Event Coordinator</p>
-                        <p className="text-sm font-bold text-white">{event.coordinator}</p>
-                      </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
