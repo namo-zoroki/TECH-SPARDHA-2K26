@@ -1,5 +1,5 @@
 /**
- * TECHSPARDHA 2K26 - Backend (Google Apps Script) - v1.2
+ * TECHSPARDHA 2K26 - Backend (Google Apps Script) - v1.5
  *
  * Implements TechSpardha_Registration_Spec.md plus the final decisions:
  *  - Gamer Fiesta is ONE event with per-game team sizes (Events.GameSizes).
@@ -27,7 +27,7 @@
  *    The final check still runs again inside register, so the live check is only a hint.
  *
  * v1.3 CHANGE: stricter College ID.
- *  - Format: A + year 2023 to 2026 + branch code (CSEAIML, CSE, CS, IT, BT, ME, ECE, MBA, MCA)
+ *  - Format: A + year 2023 to 2026 + ID branch code (CSEAIML, CSE, CS, IT, BT, ME, EC, MBA, MCA, CSD)
  *    + 4 or 5 digits. Example: A2024CSE1234.
  *  - Edit ID_YEAR_PATTERN / ID_BRANCH_CODES in CONFIG to change it.
  *
@@ -35,6 +35,14 @@
  *  - Full name: English letters, spaces and . ' - only. Starts with a letter, no digits, 2 to 60 characters.
  *  - Email: only @gmail.com or @imsec.ac.in, and the part before @ must start with a letter.
  *  - Edit ALLOWED_EMAIL_DOMAINS / NAME_* in CONFIG to change these.
+ *
+ * v1.5 CHANGE: ECE / EC fix and CSD branch.
+ *  - Branch is shown and stored as ECE, but the College ID carries EC (A2024EC11231).
+ *    BRANCH_ID_CODE maps a branch to the code expected inside the ID. The ID check uses EC.
+ *  - ECE students are no longer flagged BRANCH_MISMATCH (the flag now compares against the mapped code).
+ *  - CSD added as a branch and as an ID code. Only 3rd and 4th year students can choose CSD
+ *    (the college has discontinued it). Edit CSD_YEARS in CONFIG to change this.
+ *  - migrateEcBranch(): run once if any participant was saved with the old branch value "EC".
  *
  * SETUP (once):
  *  1. appsscript.json: set "timeZone": "Asia/Kolkata".
@@ -90,15 +98,23 @@ const ADMIN_ID_REGEX = /^[a-z0-9_.-]{2,40}$/;
 const MIN_ADMIN_PASSWORD_LEN = 12;
 const EXPORT_KINDS = ['registrations_csv', 'contacts_csv', 'copy_all_emails', 'copy_captain_emails'];
 
-// College ID: A + year 2023-2026 + a valid branch code + 4-5 digits. Change here only.
-// Example: A2024CSE1234. (ASH is a branch choice on the form, not a code used inside the ID.)
+// College ID: A + year 2023-2026 + a valid ID branch code + 4-5 digits. Change here only.
+// Example: A2024CSE1234, A2024EC11231. (ASH is a branch choice on the form, not a code used inside the ID.)
 const ID_YEAR_PATTERN = '202[3-6]';
-const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'ECE', 'MBA', 'MCA'];
+const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'EC', 'MBA', 'MCA', 'CSD'];
 const COLLEGE_ID_REGEX = new RegExp('^A' + ID_YEAR_PATTERN + '(?:' + ID_BRANCH_CODES.join('|') + ')\\d{4,5}$');
 const COLLEGE_ID_LETTERS_REGEX = new RegExp('^A\\d{4}(' + ID_BRANCH_CODES.join('|') + ')\\d{4,5}$');
 const COLLEGE_ID_HELP = 'College ID must look like A2024CSE1234: A, a year from 2023 to 2026, a branch code (' +
   ID_BRANCH_CODES.join(', ') + ') and 4 or 5 digits.';
-const BRANCHES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'BT', 'ME', 'ECE', 'MBA', 'MCA'];
+
+// Branch shown on the form and stored in the sheet. ECE is the display value.
+const BRANCHES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'CSD', 'BT', 'ME', 'ECE', 'MBA', 'MCA'];
+// The code that appears INSIDE the college ID when it differs from the branch name.
+// ECE students have EC in their ID (A2024EC11231). ASH has no code, so it is not listed.
+const BRANCH_ID_CODE = { ECE: 'EC' };
+// CSD was discontinued by the college, so only these years can choose it.
+const CSD_YEARS = ['3rd', '4th'];
+
 const YEARS = ['1st', '2nd', '3rd', '4th'];
 const SLOTS = ['1', '2', '3', 'TS'];
 const SLOT_COLUMN = { '1': 'Slot1', '2': 'Slot2', '3': 'Slot3', 'TS': 'TechSnap' };
@@ -191,9 +207,15 @@ function normPhone_(raw) {
   else if (s.charAt(0) === '0') s = s.slice(1);
   return /^[6-9]\d{9}$/.test(s) ? s : null;
 }
+// The branch code inside a College ID, e.g. 'EC' for A2024EC11231 ('' if the ID is not valid).
 function idLetters_(id) {
   const m = COLLEGE_ID_LETTERS_REGEX.exec(id);
   return m ? m[1] : '';
+}
+// The code a branch should have inside the College ID (ECE -> EC). ASH returns '' (no check).
+function branchIdCode_(branch) {
+  if (branch === 'ASH') return '';
+  return BRANCH_ID_CODE[branch] || branch;
 }
 function splitList_(v) {
   return String(v === null || v === undefined ? '' : v).split(',').map(function (x) { return x.trim(); }).filter(Boolean);
@@ -587,6 +609,9 @@ function validatePerson_(p, label, errors) {
     if ((out.branch === 'MBA' || out.branch === 'MCA') && out.year !== '1st' && out.year !== '2nd') {
       errors.push(err_(label + '.year', who + ': MBA and MCA students can only be 1st or 2nd year.', 'BRANCH_YEAR'));
     }
+    if (out.branch === 'CSD' && CSD_YEARS.indexOf(out.year) === -1) {
+      errors.push(err_(label + '.branch', who + ': CSD is only for 3rd and 4th year students.', 'BRANCH_YEAR'));
+    }
   }
   return errors.length === start ? out : null;
 }
@@ -810,7 +835,8 @@ function upsertParticipant_(p, slotCol, regId, partMap, undo) {
   if (!existing) {
     const letters = idLetters_(p.collegeId);
     const flags = [];
-    if (p.branch !== 'ASH' && letters && letters !== p.branch) flags.push('BRANCH_MISMATCH');
+    // Compare the ID code with the code the branch should have (ECE -> EC), so ECE students are not flagged.
+    if (p.branch !== 'ASH' && letters && letters !== branchIdCode_(p.branch)) flags.push('BRANCH_MISMATCH');
     const obj = {
       CollegeID: p.collegeId, FullName: neutralize_(p.fullName), Email: p.email, Phone: p.phone,
       Year: p.year, Branch: p.branch, Slot1: '', Slot2: '', Slot3: '', TechSnap: '',
@@ -1278,6 +1304,36 @@ function adminEditParticipant_(data, actor, undo) {
 // ============================================================
 // MANUAL MAINTENANCE (run from the Apps Script editor)
 // ============================================================
+// Run ONCE if any participant was saved with the old branch value "EC" (it is now "ECE").
+// Also removes a stale BRANCH_MISMATCH flag from rows that were flagged only because of EC vs ECE.
+function migrateEcBranch() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_WAIT_MS);
+  try {
+    const t = readTable_(S.PARTS);
+    let changed = 0, unflagged = 0;
+    t.rows.forEach(function (r) {
+      if (String(r.Branch).trim() === 'EC') {
+        setCell_(S.PARTS, r._row, 'Branch', 'ECE');
+        r.Branch = 'ECE';
+        changed++;
+      }
+      const flags = splitList_(r.Flags);
+      if (flags.indexOf('BRANCH_MISMATCH') !== -1 && String(r.Branch).trim() !== 'ASH') {
+        const letters = idLetters_(normId_(r.CollegeID));
+        if (letters && letters === branchIdCode_(String(r.Branch).trim())) {
+          const kept = flags.filter(function (x) { return x !== 'BRANCH_MISMATCH'; }).join(', ');
+          setCell_(S.PARTS, r._row, 'Flags', kept);
+          unflagged++;
+        }
+      }
+    });
+    Logger.log('Branch EC -> ECE: ' + changed + ' rows. Stale BRANCH_MISMATCH flags removed: ' + unflagged + '.');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Rebuilds Slot1/Slot2/Slot3/TechSnap in Participants from Registrations + Team_Members.
 function rebuildSlotLedger() {
   const lock = LockService.getScriptLock();

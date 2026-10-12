@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Menu, X } from 'lucide-react';
 import { Button } from './ui/Button';
 
+/** Height of the fixed navbar, so a section's heading is not hidden behind it after scrolling. */
+const NAV_OFFSET = 80;
+
 export const Navbar: React.FC = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -36,14 +39,25 @@ export const Navbar: React.FC = () => {
   ];
 
   const scrollTo = (href: string) => {
+    const id = href.replace('#', '');
+
+    // Close the menu first, then scroll on the next tick. Scrolling in the same click that
+    // starts the menu's collapse animation can cancel the smooth scroll on phones.
     setMobileMenuOpen(false);
-    const targetId = href.replace('#', '');
-    const el = document.getElementById(targetId);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    } else {
-      window.location.href = href;
-    }
+
+    window.setTimeout(() => {
+      if (id === 'home') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      const el = document.getElementById(id);
+      if (!el) {
+        console.warn(`Navbar: no element with id "${id}" on the page.`);
+        return;
+      }
+      const top = el.getBoundingClientRect().top + window.scrollY - NAV_OFFSET;
+      window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' });
+    }, 50);
   };
 
   return (
@@ -54,7 +68,14 @@ export const Navbar: React.FC = () => {
     >
       <div className="container-width px-4 sm:px-6 flex items-center justify-between">
         {/* Brand */}
-        <a href="#home" onClick={() => scrollTo('#home')} className="flex items-center gap-2.5 sm:gap-3 group">
+        <a
+          href="#home"
+          onClick={(e) => {
+            e.preventDefault();
+            scrollTo('#home');
+          }}
+          className="flex items-center gap-2.5 sm:gap-3 group"
+        >
           <div className="h-9 w-9 sm:h-10 sm:w-10 md:h-12 md:w-12 flex items-center justify-center group-hover:scale-105 transition-transform">
             <img src="/assets/genesis.webp" alt="GENESIS Technical Society" className="w-full h-full object-contain" />
           </div>

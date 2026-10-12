@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   Copy,
   Check,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input, Select } from "./ui/Input";
@@ -26,7 +27,6 @@ import {
   type RegisterSuccess,
 } from "@/src/services/api";
 import {
-  BRANCH_CODES,
   COLLEGE_ID_EXAMPLE,
   COLLEGE_ID_REGEX,
   EMAIL_HINT,
@@ -38,6 +38,7 @@ import {
   TEAM_NAME_MAX,
   UPI_ID,
   YEAR_OPTIONS,
+  branchesForYear,
   buildUpiLink,
   emptyPerson,
   normalizeCollegeId,
@@ -52,6 +53,9 @@ import {
 // ---------------------------------------------------------------------------
 // Types and small helpers
 // ---------------------------------------------------------------------------
+
+/** Community WhatsApp group shown after a successful registration. Change the link here only. */
+const WHATSAPP_GROUP_URL = "https://chat.whatsapp.com/JDjinxL7ZyV2EMWoHo9EGx";
 
 type StepId = 1 | 2 | 3 | 4 | 5;
 
@@ -124,13 +128,15 @@ function teamLabel(ev: EventInfo): string {
 function cleanPerson(x: unknown): Person {
   const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
   const s = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : "");
+  const branch = s("branch");
   return {
     fullName: s("fullName"),
     collegeId: s("collegeId"),
     email: s("email"),
     phone: s("phone"),
     year: s("year"),
-    branch: s("branch"),
+    // An old saved draft may still hold the previous value "EC"; the branch is now shown as ECE.
+    branch: branch === "EC" ? "ECE" : branch,
   };
 }
 
@@ -190,6 +196,11 @@ interface PersonFieldsProps {
 const PersonFields: React.FC<PersonFieldsProps> = ({ prefix, person, errors, visible, onChange, onTouch }) => {
   const err = (f: keyof Person) => (visible(`${prefix}.${f}`) ? errors[f] : undefined);
   const yearAllowed = yearsForBranch(person.branch);
+
+  // Branches that fit the chosen year. A branch that no longer fits stays listed so the
+  // dropdown never shows blank and the validation message explains the problem.
+  const branchList = branchesForYear(person.year);
+  if (person.branch && !branchList.includes(person.branch)) branchList.push(person.branch);
 
   return (
     <div
@@ -266,11 +277,13 @@ const PersonFields: React.FC<PersonFieldsProps> = ({ prefix, person, errors, vis
           onChange={(e) => onChange("branch", e.target.value)}
           options={[
             { label: "Select branch", value: "" },
-            ...BRANCH_CODES.map((b) => ({ label: b === "ASH" ? "ASH (1st year B.Tech)" : b, value: b })),
+            ...branchList.map((b) => ({ label: b === "ASH" ? "ASH (1st year B.Tech)" : b, value: b })),
           ]}
           error={err("branch")}
         />
-        <p className="text-[10px] text-white/40 tracking-wide">1st year B.Tech students: choose ASH.</p>
+        <p className="text-[10px] text-white/40 tracking-wide">
+          1st year B.Tech students: choose ASH. CSD is only for 3rd and 4th year.
+        </p>
       </div>
     </div>
   );
@@ -1323,6 +1336,12 @@ export const RegistrationForm: React.FC = () => {
           <p>1. Every participant must carry their original College ID card. Details are verified at entry.</p>
           <p>2. Please report to the venue at least 30 minutes before the announced slot time.</p>
           <p>3. Keep this Registration ID safe for attendance and prize distribution.</p>
+          <p>
+            4. Join the official TechSpardha WhatsApp group for updates:{" "}
+            <a href={WHATSAPP_GROUP_URL} className="font-semibold text-black underline break-all">
+              {WHATSAPP_GROUP_URL}
+            </a>
+          </p>
           <p className="text-[10px] text-neutral-500 pt-2">Generated on {today} · TECHSPARDHA 2K26 Official Portal</p>
         </div>
       </div>
@@ -1399,14 +1418,26 @@ export const RegistrationForm: React.FC = () => {
             Keep your registration ID safe and carry your college ID card. Cards are checked at entry.
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-4 justify-center">
             <Button variant="secondary" onClick={() => window.print()}>
               Download Confirmation
             </Button>
+            <a
+              href={WHATSAPP_GROUP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 text-white text-sm font-bold uppercase tracking-widest transition-colors"
+            >
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp Group
+            </a>
             <Button variant="outline" onClick={startAnother}>
               Register for another event
             </Button>
           </div>
+          <p className="text-[10px] text-white/40 uppercase tracking-widest">
+            Join the WhatsApp group for event updates and announcements.
+          </p>
         </div>
 
         {/* Print-only slip, mounted on <body> so nothing else on the site can leak into the PDF */}
@@ -1443,9 +1474,9 @@ export const RegistrationForm: React.FC = () => {
               Secure your spot in TechSpardha 2K26. Follow the steps below.
             </p>
             <p className="mt-4 text-center text-sm font-semibold uppercase tracking-widest text-red-400">
-  <span aria-hidden="true" className="mr-2">⚠</span>
-  Last date to register: <span className="whitespace-nowrap">17 October</span>
-</p>
+              <span aria-hidden="true" className="mr-2">⚠</span>
+              Last date to register: <span className="whitespace-nowrap">17 October</span>
+            </p>
           </div>
 
           {notice && (

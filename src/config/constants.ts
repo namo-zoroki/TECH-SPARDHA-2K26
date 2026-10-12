@@ -2,7 +2,7 @@
  * Shared constants and pure rules for TechSpardha 2K26.
  * Used by the registration form and the admin dashboard.
  * The server re-validates every rule here; this file only gives instant feedback.
- * Keep these rules in sync with the Apps Script backend (v1.4) CONFIG block.
+ * Keep these rules in sync with the Apps Script backend (v1.5) CONFIG block.
  */
 import type { Person } from '@/src/services/api';
 
@@ -30,13 +30,25 @@ export const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024; // 2 MB (server limit is 3 
 // Identity rules
 // ---------------------------------------------------------------------------
 
-export const BRANCH_CODES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'BT', 'ME', 'ECE', 'MBA', 'MCA'] as const;
+/** Branches shown in the dropdown (display values, also what the server stores). */
+export const BRANCH_CODES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'CSD', 'BT', 'ME', 'ECE', 'MBA', 'MCA'] as const;
 
-/** Branch codes allowed INSIDE a College ID. ASH is a form choice only, never part of an ID. */
-export const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'ECE', 'MBA', 'MCA'] as const;
+/**
+ * Codes allowed INSIDE a College ID. ASH is a form choice only, never part of an ID.
+ * ECE students have EC in their ID (A2024EC11231), so the ID code is EC, not ECE.
+ */
+export const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'EC', 'MBA', 'MCA', 'CSD'] as const;
+
+/** Branch whose ID code differs from its display name. */
+const BRANCH_TO_ID_CODE: Record<string, string> = { ECE: 'EC' };
+const ID_CODE_TO_BRANCH: Record<string, string> = { EC: 'ECE' };
+
+/** CSD was discontinued by the college, so only 3rd and 4th year students can choose it. */
+export const CSD_YEARS = ['3rd', '4th'];
+
 const ID_YEAR_PATTERN = '202[3-6]';
 
-/** A + year 2023-2026 + branch code + 4-5 digits, e.g. A2024CSE1234. Change here only. */
+/** A + year 2023-2026 + ID branch code + 4-5 digits, e.g. A2024CSE1234 or A2024EC11231. Change here only. */
 export const COLLEGE_ID_REGEX = new RegExp(`^A${ID_YEAR_PATTERN}(?:${ID_BRANCH_CODES.join('|')})\\d{4,5}$`);
 const COLLEGE_ID_LETTERS_REGEX = new RegExp(`^A\\d{4}(${ID_BRANCH_CODES.join('|')})\\d{4,5}$`);
 export const COLLEGE_ID_EXAMPLE = 'A2024CSE1234';
@@ -54,6 +66,12 @@ export const YEAR_OPTIONS = [
 
 const PG_BRANCHES = ['MBA', 'MCA'];
 const FIRST_YEAR_BRANCHES = ['ASH', 'MBA', 'MCA'];
+
+/** The code a branch carries inside the College ID (ECE -> EC). ASH has none. */
+export function branchIdCode(branch: string): string {
+  if (branch === 'ASH') return '';
+  return BRANCH_TO_ID_CODE[branch] ?? branch;
+}
 
 // Full name: English letters, spaces and . ' - only. Starts with a letter. No digits.
 export const NAME_MIN = 2;
@@ -147,7 +165,7 @@ export function normalizePhone(raw: string): string | null {
   return /^[6-9]\d{9}$/.test(s) ? s : null;
 }
 
-/** The branch letters inside a College ID ('' if the ID is not valid). */
+/** The branch code inside a College ID, e.g. 'EC' for A2024EC11231 ('' if the ID is not valid). */
 export function idLetters(id: string): string {
   const m = COLLEGE_ID_LETTERS_REGEX.exec(normalizeCollegeId(id));
   return m ? m[1] : '';
@@ -157,22 +175,39 @@ export function idLetters(id: string): string {
 // Branch / Year behaviour
 // ---------------------------------------------------------------------------
 
+/** Branch to pre-select from the College ID and year. Returns '' when nothing fits. */
 export function suggestBranch(id: string, year: string): string {
-  const letters = idLetters(id);
-  if (year === '1st' && !PG_BRANCHES.includes(letters)) return 'ASH';
-  return (BRANCH_CODES as readonly string[]).includes(letters) && letters !== 'ASH' ? letters : '';
+  const code = idLetters(id);
+  if (year === '1st' && !PG_BRANCHES.includes(code)) return 'ASH';
+  const branch = ID_CODE_TO_BRANCH[code] ?? code; // EC -> ECE
+  if (!(BRANCH_CODES as readonly string[]).includes(branch) || branch === 'ASH') return '';
+  if (branch === 'CSD' && year && !CSD_YEARS.includes(year)) return '';
+  return branch;
 }
 
-/** Years a student may pick for a branch: ASH is locked to 1st, MBA/MCA only 1st-2nd. */
+/** Years a student may pick for a branch: ASH is 1st only, MBA/MCA 1st-2nd, CSD 3rd-4th. */
 export function yearsForBranch(branch: string): string[] {
   if (branch === 'ASH') return ['1st'];
   if (PG_BRANCHES.includes(branch)) return ['1st', '2nd'];
+  if (branch === 'CSD') return [...CSD_YEARS];
   return YEAR_OPTIONS.map((y) => y.value);
+}
+
+/** Branches a student may pick for a year. Use this to build the branch dropdown. */
+export function branchesForYear(year: string): string[] {
+  return (BRANCH_CODES as readonly string[]).filter((b) => {
+    if (!year) return true;
+    if (year === '1st') return FIRST_YEAR_BRANCHES.includes(b);
+    if (b === 'ASH') return false;
+    if (PG_BRANCHES.includes(b)) return year === '2nd';
+    if (b === 'CSD') return CSD_YEARS.includes(year);
+    return true;
+  });
 }
 
 export const emptyPerson = (): Person => ({ fullName: '', collegeId: '', email: '', phone: '', year: '', branch: '' });
 
-/** Applies one field change and the automatic ASH / pre-fill rules. */
+/** Applies one field change and the automatic ASH / CSD / pre-fill rules. */
 export function updatePerson(prev: Person, field: keyof Person, raw: string): Person {
   const next: Person = { ...prev, [field]: field === 'collegeId' ? raw.toUpperCase() : raw };
 
@@ -186,12 +221,16 @@ export function updatePerson(prev: Person, field: keyof Person, raw: string): Pe
       next.branch = suggestBranch(next.collegeId, '1st');
     } else if (raw !== '1st' && next.branch === 'ASH') {
       next.branch = suggestBranch(next.collegeId, raw);
+    } else if (next.branch === 'CSD' && !CSD_YEARS.includes(raw)) {
+      // CSD is only for 3rd/4th year, so a different year clears it.
+      next.branch = suggestBranch(next.collegeId, raw);
     }
   }
 
   if (field === 'branch') {
     if (raw === 'ASH') next.year = '1st';
     else if (PG_BRANCHES.includes(raw) && next.year && !['1st', '2nd'].includes(next.year)) next.year = '';
+    else if (raw === 'CSD' && next.year && !CSD_YEARS.includes(next.year)) next.year = '';
   }
   return next;
 }
@@ -228,6 +267,9 @@ export function validatePerson(p: Person): PersonErrors {
     }
     if (PG_BRANCHES.includes(p.branch) && p.year !== '1st' && p.year !== '2nd') {
       e.year = 'MBA and MCA students can only be 1st or 2nd year.';
+    }
+    if (p.branch === 'CSD' && !CSD_YEARS.includes(p.year)) {
+      e.branch = 'CSD is only for 3rd and 4th year students.';
     }
   }
   return e;
