@@ -190,7 +190,8 @@ export const events: TechEvent[] = [
     fee: 0,
     coordinators: [
       { name: "Kritika Chaudhary", phone: "7505378966" },
-      { name: "Ayush Sharma", phone: "8445761281" }
+      { name: "Diya Parmar", phone: "9873871037" }
+      
     ],
     teamSize: "3–5 members",
     description: "Campus-wide technical treasure hunt involving clues, technology knowledge, observation, navigation and teamwork.",
@@ -271,7 +272,7 @@ export const events: TechEvent[] = [
     fee: 0,
     coordinators: [
       { name: "Daksh Srivastava", phone: "9389159755" },
-      { name: "Diya Parmar", phone: "9873871037" }
+      { name: "Ayush Sharma", phone: "8445761281" }
     ],
     teamSize: "2 members (duo)",
     description: "Management challenge covering business judgment, leadership, communication, strategy and decision making.",
