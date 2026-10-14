@@ -49,30 +49,40 @@ export const events: TechEvent[] = [
   },
   {
     id: "02",
-    name: "RoboRace 2.0",
-    category: "Robotics",
-    format: "Team",
-    fee: 0,
-    coordinators: [
-      { name: "Barish Tiwari", phone: "9313323860" },
-      { name: "Avanish Choudhary", phone: "9170391838" }
-    ],
-    teamSize: "2–4 members",
-    description: "Robotics challenge involving design, control, navigation, stability and speed.",
-    purpose: "To showcase engineering precision, mechanical design, and control efficiency in robotics.",
-    procedure: "Robots must navigate a challenging track with obstacles in the shortest possible time.",
-    rules: [
-      "Robots must adhere to specified dimensions.",
-      "Only one operator per team per run.",
-      "Touching the robot during the run may incur penalties.",
-      "Safety protocols must be followed at all times."
-    ],
-    judging: [
-      "Time Taken",
-      "Control Precision",
-      "Robot Stability",
-      "Innovation in Design"
-    ]
+name: "Circuit Dash",
+category: "Programming / Technical Debugging",
+format: "Team",
+fee: 0,
+coordinators: [
+  // TODO: confirm. You didn't send new coordinators, so these are the old RoboRace ones
+  { name: "Barish Tiwari", phone: "9313323860" },
+  { name: "Avanish Choudhary", phone: "9170391838" }
+],
+teamSize: "2–4 members",
+description: "A technical debugging competition that evaluates circuit understanding, logical reasoning, C programming skills and problem-solving abilities. Participants receive faulty C programs and corresponding virtual 3D simulated circuit diagrams or circuit-logic scenarios. They must identify errors, correct the code, and verify the expected results in the designated testing environment.",
+purpose: "To develop C programming and debugging skills, strengthen circuit-logic understanding, encourage analytical thinking and systematic problem-solving, and evaluate the accuracy of code correction.",
+procedure: "The competition consists of a single round. Participants analyse faulty C programs and corresponding circuit diagrams or logic scenarios, identify errors, correct the code, compile and test their solutions, and submit the final code and required answers before the deadline. Only Standard C is permitted; C++ is prohibited.",
+rules: [
+  "Only Standard C programming is permitted; C++ is not allowed.",
+  "Participants must bring their own laptops.",
+  "No physical circuit construction is required.",
+  "Participants must use the designated coding and testing environment.",
+  "All solutions must be submitted before the official deadline.",
+  "Sharing code or answers with other teams is prohibited.",
+  "Unauthorised external assistance, AI tools, and copying solutions are prohibited.",
+  "Participants must follow instructions issued by event coordinators.",
+  "Technical issues must be reported to the organisers immediately.",
+  "The organisers' decisions regarding evaluation and rankings are final."
+],
+judging: [
+  "Number of Bugs Identified: 25 marks",
+  "Circuit Error Identification: 25 marks",
+  "Code Correction Accuracy: 25 marks",
+  "Successful Execution of Corrected Code: 25 marks",
+  "Total: 100 marks",
+  "The challenge contains exactly 25 predefined bugs. Each correctly identified bug earns one mark. Incorrect or duplicate identifications receive no marks.",
+  "Circuit errors, code corrections, and successful execution are evaluated separately against the organisers' answer key and test cases."
+]
   },
   {
     id: "04",

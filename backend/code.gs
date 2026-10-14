@@ -165,7 +165,7 @@ const TEXT_COLUMNS = {
 // The IDs match the final table in the handoff (Gamer Fiesta keeps '08').
 const EVENT_SEED = [
   ['01', 'CodeDecode 2.0', '1', 1, 2, '', '', 0, true],
-  ['02', 'RoboRace 2.0', '1', 2, 4, '', '', 0, true],
+  ['02', 'Circuit Dash', '1', 2, 4, '', '', 0, true],
   ['03', 'Ideathon', '1', 2, 4, '', '', 0, true],
   ['04', 'AI Build Arena', '2', 2, 4, '', '', 0, true],
   ['05', 'UI/UX Blitz', '2', 1, 2, '', '', 0, true],
