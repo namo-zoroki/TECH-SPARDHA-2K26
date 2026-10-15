@@ -225,7 +225,7 @@ judging: [
     name: "Gamer Fiesta 2.0",
     category: "E-Sports",
     format: "Team",
-    fee: 200,
+    fee: 0,
     coordinators: [
       { name: "Ambuj Kumar Srivastava", phone: "9695746991" },
       { name: "Sagar Soni", phone: "7254901730" }
@@ -235,7 +235,7 @@ judging: [
     purpose: "To provide a platform for competitive e-sports enthusiasts to showcase their skills.",
     procedure: "Bracket-based tournament with strict match timings.",
     rules: [
-      "Entry fee of ₹200 per team is mandatory.",
+      "Entry fee of ₹free per team is mandatory.",
       "No use of cheats or exploits.",
       "Teams must report 15 mins before match time.",
       "Sportsmanship is expected."

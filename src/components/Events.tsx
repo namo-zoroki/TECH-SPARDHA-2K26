@@ -233,7 +233,7 @@ export const EventSpotlights: React.FC = () => {
             </p>
             <MetaRow event={gamerFiesta} color={PURPLE} showTeam={false} />
             <p className="mt-4 border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-semibold leading-relaxed text-red-400">
-              Registration is confirmed only after your payment is verified.
+              ALL THE BEST WINNERS!!
             </p>
             <RegisterButton eventId="08" color={PURPLE} label="Enter the tournament" />
           </Card>

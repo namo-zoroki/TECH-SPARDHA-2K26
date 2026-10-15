@@ -18,7 +18,7 @@ export const Schedule: React.FC = () => {
     },
     {
       date: '23 Oct',
-      time: '2:30 PM – 5:30 PM',
+      time: '2:30 PM – 4:30 PM',
       activity: 'Slot 2 Events',
       tag: 'Day 1',
     },
