@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { QRCodeCanvas } from "qrcode.react";
 import {
   CheckCircle2,
   AlertTriangle,
-  Upload,
   X,
   ChevronRight,
   ChevronLeft,
@@ -18,7 +16,6 @@ import { Input, Select } from "./ui/Input";
 import { cn } from "@/src/lib/utils";
 import {
   apiService,
-  fileToDataUrl,
   newIdempotencyKey,
   isFailure,
   type EventInfo,
@@ -30,16 +27,13 @@ import {
   COLLEGE_ID_EXAMPLE,
   COLLEGE_ID_REGEX,
   EMAIL_HINT,
-  MAX_SCREENSHOT_BYTES,
   NAME_MAX,
   SLOT_GROUPS,
   TEAM_NAME_CHECK_DEBOUNCE_MS,
   TEAM_NAME_HINT,
   TEAM_NAME_MAX,
-  UPI_ID,
   YEAR_OPTIONS,
   branchesForYear,
-  buildUpiLink,
   emptyPerson,
   normalizeCollegeId,
   teamNameFormatError,
@@ -57,12 +51,8 @@ import {
 /** Community WhatsApp group shown after a successful registration. Change the link here only. */
 const WHATSAPP_GROUP_URL = "https://chat.whatsapp.com/JDjinxL7ZyV2EMWoHo9EGx";
 
-type StepId = 1 | 2 | 3 | 4 | 5;
-
-interface Shot {
-  file: File;
-  preview: string;
-}
+/** 1 event, 2 your details, 3 team details (team events only), 4 review & submit. All events are free: no payment step. */
+type StepId = 1 | 2 | 3 | 4;
 
 interface Draft {
   step: StepId;
@@ -71,7 +61,6 @@ interface Draft {
   teamName: string;
   game: string;
   members: Person[];
-  utr: string;
   key: string;
 }
 
@@ -88,7 +77,8 @@ interface NameCheckState {
   message: string;
 }
 
-const DRAFT_KEY = "ts26_registration_draft_v1";
+// v2: the step numbers changed when the payment step was removed, so old drafts are ignored.
+const DRAFT_KEY = "ts26_registration_draft_v2";
 const RETRYABLE = ["NETWORK_ERROR", "TIMEOUT", "BAD_RESPONSE", "SERVER_ERROR", "BUSY"];
 const NAME_TAKEN_FALLBACK = "This team name is already taken. Please choose another.";
 
@@ -96,8 +86,7 @@ const STEP_TITLES: Record<StepId, string> = {
   1: "Select Your Event",
   2: "Your Details",
   3: "Team Details",
-  4: "Payment",
-  5: "Review & Submit",
+  4: "Review & Submit",
 };
 
 const isTeamEvent = (ev?: EventInfo) => !!ev && ev.teamMax > 1;
@@ -105,8 +94,7 @@ const isTeamEvent = (ev?: EventInfo) => !!ev && ev.teamMax > 1;
 function stepsFor(ev?: EventInfo): StepId[] {
   const s: StepId[] = [1, 2];
   if (isTeamEvent(ev)) s.push(3);
-  if (ev && ev.fee > 0) s.push(4);
-  s.push(5);
+  s.push(4);
   return s;
 }
 
@@ -147,7 +135,7 @@ function loadDraft(): Draft | null {
     const d = JSON.parse(raw) as Record<string, unknown>;
     if (!d || typeof d !== "object") return null;
     const eventId = typeof d.eventId === "string" ? d.eventId : "";
-    const step = [1, 2, 3, 4, 5].includes(d.step as number) && eventId ? (d.step as StepId) : 1;
+    const step = [1, 2, 3, 4].includes(d.step as number) && eventId ? (d.step as StepId) : 1;
     const key = typeof d.key === "string" && /^[A-Za-z0-9_-]{8,100}$/.test(d.key) ? d.key : newIdempotencyKey();
     return {
       step,
@@ -156,7 +144,6 @@ function loadDraft(): Draft | null {
       teamName: typeof d.teamName === "string" ? d.teamName : "",
       game: typeof d.game === "string" ? d.game : "",
       members: Array.isArray(d.members) ? d.members.slice(0, 20).map(cleanPerson) : [],
-      utr: typeof d.utr === "string" ? d.utr.replace(/\D/g, "").slice(0, 12) : "",
       key,
     };
   } catch {
@@ -166,7 +153,7 @@ function loadDraft(): Draft | null {
 
 function saveDraft(d: Draft) {
   try {
-    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); // the screenshot is never saved
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
   } catch {
     /* ignore */
   }
@@ -175,6 +162,7 @@ function saveDraft(d: Draft) {
 function clearDraft() {
   try {
     sessionStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem("ts26_registration_draft_v1"); // the old draft (with payment fields), if any
   } catch {
     /* ignore */
   }
@@ -305,9 +293,6 @@ export const RegistrationForm: React.FC = () => {
   const [teamName, setTeamName] = useState(initial?.teamName ?? "");
   const [game, setGame] = useState(initial?.game ?? "");
   const [members, setMembers] = useState<Person[]>(initial?.members ?? []);
-  const [utr, setUtr] = useState(initial?.utr ?? "");
-  const [shot, setShot] = useState<Shot | null>(null);
-  const [shotError, setShotError] = useState("");
   const [consent, setConsent] = useState(false);
 
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -321,7 +306,6 @@ export const RegistrationForm: React.FC = () => {
   const [success, setSuccess] = useState<RegisterSuccess | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copiedReg, setCopiedReg] = useState(false);
-  const [copiedUpi, setCopiedUpi] = useState(false);
 
   const keyRef = useRef<string>(initial?.key ?? newIdempotencyKey());
   const cardRef = useRef<HTMLDivElement>(null);
@@ -345,7 +329,6 @@ export const RegistrationForm: React.FC = () => {
 
   const selectedEvent = useMemo(() => events?.find((e) => e.eventId === eventId), [events, eventId]);
   const isTeam = isTeamEvent(selectedEvent);
-  const needsPay = !!selectedEvent && selectedEvent.fee > 0;
   const hasGames = !!selectedEvent && selectedEvent.games.length > 0;
   const steps = stepsFor(selectedEvent);
   const bounds = selectedEvent ? teamBounds(selectedEvent, game) : { min: 1, max: 1 };
@@ -366,7 +349,6 @@ export const RegistrationForm: React.FC = () => {
       return;
     }
     if (game && !ev.games.includes(game)) setGame("");
-    if (step === 5 && ev.fee > 0) setStep(4); // the screenshot is not saved in the draft
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
@@ -384,11 +366,11 @@ export const RegistrationForm: React.FC = () => {
     if (!steps.includes(step)) setStep(2);
   }, [selectedEvent, step, steps, success]);
 
-  // ----- save the draft (never the screenshot, never the consent) -----
+  // ----- save the draft (never the consent) -----
   useEffect(() => {
     if (success) return;
-    saveDraft({ step, eventId, captain, teamName, game, members, utr, key: keyRef.current });
-  }, [step, eventId, captain, teamName, game, members, utr, success]);
+    saveDraft({ step, eventId, captain, teamName, game, members, key: keyRef.current });
+  }, [step, eventId, captain, teamName, game, members, success]);
 
   const scrollToCard = () =>
     setTimeout(() => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
@@ -403,9 +385,6 @@ export const RegistrationForm: React.FC = () => {
         setGame("");
         setTeamName("");
         setMembers([]);
-        setUtr("");
-        setShot(null);
-        setShotError("");
         setConsent(false);
         setPendingGame(null);
         setSubmitError(null);
@@ -487,33 +466,6 @@ export const RegistrationForm: React.FC = () => {
     clearMemberTouched();
   };
 
-  // ----- screenshot -----
-  const onShotChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.target;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
-    setShotError("");
-    if (file.type !== "image/png" && file.type !== "image/jpeg") {
-      const heic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
-      setShotError(
-        heic
-          ? "HEIC photos are not supported. Please upload a JPG or PNG screenshot."
-          : "Only JPG or PNG images are allowed. Please upload a JPG or PNG screenshot.",
-      );
-      return;
-    }
-    if (file.size > MAX_SCREENSHOT_BYTES) {
-      setShotError("The screenshot is larger than 2 MB. Please upload a smaller image.");
-      return;
-    }
-    try {
-      setShot({ file, preview: await fileToDataUrl(file) });
-    } catch {
-      setShotError("Could not read that file. Please try another screenshot.");
-    }
-  };
-
   const copyText = async (text: string, done: (v: boolean) => void) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -585,7 +537,6 @@ export const RegistrationForm: React.FC = () => {
         : `Team size must be between ${bounds.min} and ${bounds.max} players including you.`
       : undefined;
   const membersValid = memberErrors.every((e) => Object.keys(e).length === 0);
-  const utrValid = /^\d{12}$/.test(utr);
 
   const stepValid = (s: StepId): boolean => {
     switch (s) {
@@ -596,19 +547,12 @@ export const RegistrationForm: React.FC = () => {
       case 3:
         return !teamNameError && !gameError && !sizeError && membersValid && !pendingGame;
       case 4:
-        return utrValid && !!shot;
-      case 5:
         return consent;
     }
   };
 
   const allValid =
-    !!selectedEvent &&
-    selectedEvent.open &&
-    stepValid(2) &&
-    (!isTeam || stepValid(3)) &&
-    (!needsPay || stepValid(4)) &&
-    consent;
+    !!selectedEvent && selectedEvent.open && stepValid(2) && (!isTeam || stepValid(3)) && consent;
 
   // ----- navigation -----
   const goNext = () => {
@@ -640,13 +584,14 @@ export const RegistrationForm: React.FC = () => {
   const handleSubmit = async () => {
     if (!selectedEvent || loading) return;
     if (!allValid) {
-      setAttempted((a) => ({ ...a, 5: true }));
+      setAttempted((a) => ({ ...a, 4: true }));
       return;
     }
     setLoading(true);
     setSlow(false);
     setSubmitError(null);
 
+    // No payment object: every event is free.
     const payload: RegisterPayload = {
       idempotencyKey: keyRef.current,
       eventId: selectedEvent.eventId,
@@ -657,9 +602,6 @@ export const RegistrationForm: React.FC = () => {
       payload.members = members.map(toApiPerson);
       if (teamNameClean) payload.teamName = teamNameClean;
       if (hasGames) payload.game = game;
-    }
-    if (needsPay && shot) {
-      payload.payment = { utr, screenshot: { type: shot.file.type, base64: shot.preview } };
     }
 
     const res = await apiService.register(payload, { onSlow: () => setSlow(true) });
@@ -689,9 +631,6 @@ export const RegistrationForm: React.FC = () => {
     setTeamName("");
     setGame("");
     setMembers([]);
-    setUtr("");
-    setShot(null);
-    setShotError("");
     setConsent(false);
     setPendingGame(null);
     setSubmitError(null);
@@ -774,9 +713,7 @@ export const RegistrationForm: React.FC = () => {
                     )}
                   >
                     <span className="text-lg font-bold">{ev.name}</span>
-                    <span className="text-xs text-white/40">
-                      {teamLabel(ev)} · {ev.fee > 0 ? `₹${ev.fee} per team` : "FREE"}
-                    </span>
+                    <span className="text-xs text-white/40">{teamLabel(ev)} · FREE</span>
                     {!ev.open && (
                       <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
                         Registration closed
@@ -962,122 +899,12 @@ export const RegistrationForm: React.FC = () => {
     );
   };
 
-  const renderPaymentStep = () => {
-    if (!selectedEvent) return null;
-    const link = buildUpiLink(selectedEvent.fee);
-    return (
-      <div className="space-y-6">
-        {stepHeading(4)}
-        <div className="bg-cyan-500/10 border border-cyan-500/20 p-6 md:p-8 flex flex-col items-center text-center">
-          <p className="text-sm text-white/60 mb-2 uppercase tracking-widest">Entry fee for {selectedEvent.name}</p>
-          <p className="text-5xl font-display font-bold text-white mb-2">₹{selectedEvent.fee}</p>
-          <p className="text-xs text-white/40 mb-8">Per team, paid once.</p>
-
-          <div className="w-full max-w-sm space-y-4 mb-8">
-            <div className="bg-white p-4 md:p-6 rounded-lg shadow-inner flex flex-col items-center gap-4">
-              <QRCodeCanvas
-                value={link}
-                size={220}
-                level="H"
-                includeMargin={true}
-                style={{ maxWidth: "100%", height: "auto" }}
-              />
-              <a
-                href={link}
-                className="rounded-lg bg-cyan-500 px-6 py-3 font-bold text-white hover:bg-cyan-400 transition"
-              >
-                PAY ₹{selectedEvent.fee} USING UPI
-              </a>
-              <p className="text-sm text-gray-500 text-center">
-                Scan the QR code with any UPI app, or tap the button on your phone.
-              </p>
-              <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
-                <span className="text-[11px] font-mono font-bold text-slate-700 break-all">{UPI_ID}</span>
-                <button
-                  type="button"
-                  onClick={() => void copyText(UPI_ID, setCopiedUpi)}
-                  className="text-[10px] text-cyan-600 font-bold uppercase hover:text-cyan-700"
-                >
-                  {copiedUpi ? "Copied" : "Copy"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="w-full text-left space-y-6">
-            <div className="space-y-2">
-              <Input
-                label="UTR / UPI Reference Number (12 digits)"
-                name="utr"
-                inputMode="numeric"
-                value={utr}
-                onChange={(e) => setUtr(e.target.value.replace(/\D/g, "").slice(0, 12))}
-                onBlur={() => touch("utr")}
-                placeholder="e.g. 412345678901"
-                maxLength={12}
-                autoComplete="off"
-                error={attempted[4] || touched["utr"] ? (utrValid ? undefined : "UTR must be exactly 12 digits.") : undefined}
-              />
-              <p className="text-[10px] text-white/40 tracking-wide leading-relaxed">
-                Find it in your payment app under the transaction details, labelled &quot;UTR&quot;, &quot;UPI Ref No.&quot; or
-                &quot;Transaction ID&quot;. It is 12 digits long.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-400">
-                Upload Payment Screenshot (JPG or PNG, max 2 MB)
-              </label>
-              <div
-                className={cn(
-                  "relative min-h-[180px] border-2 border-dashed border-white/20 hover:border-cyan-500/50 transition-colors p-6 flex flex-col items-center justify-center",
-                  (shotError || (attempted[4] && !shot)) && "border-red-500/50",
-                )}
-              >
-                <input
-                  type="file"
-                  aria-label="Payment screenshot"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  onChange={(e) => void onShotChange(e)}
-                  accept="image/png,image/jpeg"
-                />
-                {shot ? (
-                  <div className="relative w-full aspect-video bg-black/40">
-                    <img src={shot.preview} alt="Payment screenshot preview" className="w-full h-full object-contain" />
-                    <button
-                      type="button"
-                      aria-label="Remove screenshot"
-                      onClick={() => setShot(null)}
-                      className="absolute top-2 right-2 z-10 p-1 bg-red-500 rounded-full"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-2 pointer-events-none">
-                    <Upload className="w-8 h-8 text-white/20" />
-                    <p className="text-sm text-white/40">Click or drag a screenshot here</p>
-                  </div>
-                )}
-              </div>
-              {shotError && <p className="text-[10px] text-red-500 uppercase tracking-tight">{shotError}</p>}
-              {!shotError && attempted[4] && !shot && (
-                <p className="text-[10px] text-red-500 uppercase tracking-tight">Payment screenshot is required.</p>
-              )}
-            </div>
-          </div>
-        </div>
-        {navButtons()}
-      </div>
-    );
-  };
-
   const renderReviewStep = () => {
     if (!selectedEvent) return null;
     const people = [captain, ...members];
     return (
       <div className="space-y-6">
-        {stepHeading(5)}
+        {stepHeading(4)}
 
         {!selectedEvent.open && (
           <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
@@ -1100,14 +927,10 @@ export const RegistrationForm: React.FC = () => {
               <p className="text-sm font-bold">{game}</p>
             </div>
           )}
-          {needsPay && (
-            <div className="p-4 bg-white/5 border border-white/5">
-              <p className="text-[10px] uppercase text-white/40">Payment</p>
-              <p className="text-sm font-bold">
-                ₹{selectedEvent.fee} · UTR <span className="font-mono">{utr}</span>
-              </p>
-            </div>
-          )}
+          <div className="p-4 bg-white/5 border border-white/5">
+            <p className="text-[10px] uppercase text-white/40">Entry fee</p>
+            <p className="text-sm font-bold">Free</p>
+          </div>
         </div>
 
         <div className="p-4 bg-white/5 border border-white/5 space-y-3">
@@ -1138,7 +961,7 @@ export const RegistrationForm: React.FC = () => {
             cards are checked at entry.
           </span>
         </label>
-        {attempted[5] && !consent && (
+        {attempted[4] && !consent && (
           <p className="text-[10px] text-red-500 uppercase tracking-tight">Please confirm to continue.</p>
         )}
 
@@ -1199,7 +1022,6 @@ export const RegistrationForm: React.FC = () => {
   // -------------------------------------------------------------------------
 
   const renderPrintableSlip = (s: RegisterSuccess) => {
-    const pending = s.paymentStatus === "pending_verification";
     const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
     const th = "border border-neutral-400 p-2 text-left font-semibold";
     const td = "border border-neutral-300 p-2 align-top";
@@ -1225,13 +1047,8 @@ export const RegistrationForm: React.FC = () => {
             <p className="text-2xl font-mono font-bold text-black tracking-wider">{s.regId}</p>
             <p className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 mt-2">Date</p>
             <p className="text-xs font-semibold text-black">{today}</p>
-            <span
-              className={cn(
-                "inline-block text-[10px] uppercase font-bold px-2 py-0.5 mt-2 border border-black",
-                pending ? "bg-white text-black" : "bg-black text-white",
-              )}
-            >
-              {pending ? "Pending Verification" : "Confirmed"}
+            <span className="inline-block text-[10px] uppercase font-bold px-2 py-0.5 mt-2 border border-black bg-black text-white">
+              Confirmed
             </span>
           </div>
         </div>
@@ -1330,9 +1147,6 @@ export const RegistrationForm: React.FC = () => {
         {/* Instructions */}
         <div className="slip-block mt-6 border-t border-neutral-300 pt-4 text-[11px] text-neutral-700 space-y-1">
           <p className="font-bold uppercase text-black">Important Instructions</p>
-          {pending && (
-            <p>0. Your registration is confirmed only after the organizers verify your payment.</p>
-          )}
           <p>1. Every participant must carry their original College ID card. Details are verified at entry.</p>
           <p>2. Please report to the venue at least 30 minutes before the announced slot time.</p>
           <p>3. Keep this Registration ID safe for attendance and prize distribution.</p>
@@ -1350,10 +1164,9 @@ export const RegistrationForm: React.FC = () => {
 
   const renderSuccess = () => {
     if (!success) return null;
-    const pending = success.paymentStatus === "pending_verification";
     return (
       <>
-        {/* On-screen confirmation card (dark theme, unchanged) */}
+        {/* On-screen confirmation card (dark theme) */}
         <div className="text-center py-8 space-y-8">
           <div className="flex justify-center">
             <div className="w-24 h-24 bg-green-500/20 border border-green-500/50 rounded-full flex items-center justify-center">
@@ -1362,7 +1175,7 @@ export const RegistrationForm: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-3xl font-display font-bold uppercase">Registration Received</h3>
+            <h3 className="text-3xl font-display font-bold uppercase">Registration Confirmed</h3>
             <p className="text-xs text-white/50 uppercase tracking-widest">Your registration ID</p>
             <div className="flex items-center justify-center gap-3">
               <span className="text-4xl md:text-5xl font-mono font-bold text-cyan-400 tracking-wider">{success.regId}</span>
@@ -1400,21 +1213,11 @@ export const RegistrationForm: React.FC = () => {
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-xs text-white/40 uppercase">Status</span>
-              <span
-                className={cn(
-                  "text-xs font-bold uppercase px-2 py-0.5",
-                  pending ? "text-yellow-400 bg-yellow-400/10" : "text-green-400 bg-green-400/10",
-                )}
-              >
-                {pending ? "Pending verification" : "Confirmed"}
-              </span>
+              <span className="text-xs font-bold uppercase px-2 py-0.5 text-green-400 bg-green-400/10">Confirmed</span>
             </div>
           </div>
 
           <p className="text-xs text-white/50 max-w-md mx-auto leading-relaxed">
-            {pending
-              ? "Your registration is confirmed only after the organizers verify your payment. "
-              : ""}
             Keep your registration ID safe and carry your college ID card. Cards are checked at entry.
           </p>
 
@@ -1456,8 +1259,6 @@ export const RegistrationForm: React.FC = () => {
       case 3:
         return renderTeamStep();
       case 4:
-        return renderPaymentStep();
-      case 5:
         return renderReviewStep();
     }
   };
