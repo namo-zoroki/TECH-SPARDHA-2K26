@@ -1276,7 +1276,7 @@ export const RegistrationForm: React.FC = () => {
             </p>
             <p className="mt-4 text-center text-sm font-semibold uppercase tracking-widest text-red-400">
               <span aria-hidden="true" className="mr-2">⚠</span>
-              Last date to register: <span className="whitespace-nowrap">17 October</span>
+              Last date to register: <span className="whitespace-nowrap">20 October</span>
             </p>
           </div>
 
