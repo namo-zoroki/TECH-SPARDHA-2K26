@@ -37,7 +37,7 @@ export const BRANCH_CODES = ['ASH', 'CSE', 'CS', 'IT', 'CSEAIML', 'CSD', 'BT', '
  * Codes allowed INSIDE a College ID. ASH is a form choice only, never part of an ID.
  * ECE students have EC in their ID (A2024EC11231), so the ID code is EC, not ECE.
  */
-export const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'EC', 'MBA', 'MCA', 'CSD'] as const;
+export const ID_BRANCH_CODES = ['CSEAIML', 'CSD', 'CSE', 'CS', 'IT', 'BT', 'ME', 'EC', 'MBA', 'MCA'] as const;
 
 /** Branch whose ID code differs from its display name. */
 const BRANCH_TO_ID_CODE: Record<string, string> = { ECE: 'EC' };

@@ -101,7 +101,7 @@ const EXPORT_KINDS = ['registrations_csv', 'contacts_csv', 'copy_all_emails', 'c
 // College ID: A + year 2023-2026 + a valid ID branch code + 4-5 digits. Change here only.
 // Example: A2024CSE1234, A2024EC11231. (ASH is a branch choice on the form, not a code used inside the ID.)
 const ID_YEAR_PATTERN = '202[3-6]';
-const ID_BRANCH_CODES = ['CSEAIML', 'CSE', 'CS', 'IT', 'BT', 'ME', 'EC', 'MBA', 'MCA', 'CSD'];
+const ID_BRANCH_CODES = ['CSEAIML', 'CSD', 'CSE', 'CS', 'IT', 'BT', 'ME', 'EC', 'MBA', 'MCA'];
 const COLLEGE_ID_REGEX = new RegExp('^A' + ID_YEAR_PATTERN + '(?:' + ID_BRANCH_CODES.join('|') + ')\\d{4,5}$');
 const COLLEGE_ID_LETTERS_REGEX = new RegExp('^A\\d{4}(' + ID_BRANCH_CODES.join('|') + ')\\d{4,5}$');
 const COLLEGE_ID_HELP = 'College ID must look like A2024CSE1234: A, a year from 2023 to 2026, a branch code (' +
